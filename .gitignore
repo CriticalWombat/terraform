@@ -1,4 +1,4 @@
-/.terraform/
+/Proxmox-Testing/.terraform/
 /.venv/
 /.terraform.lock.hcl
 /terraform.tfstate
