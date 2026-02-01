@@ -8,3 +8,7 @@ proxmox_insecure  = true
 
 proxmox_ssh_username  = "your_username"
 proxmox_ssh_password  = "your_password"
+
+vmbr1_gateway   = "192.168.1.1"     # your gateway
+vm1_ip_address  = "192.168.1.100"   # your vm IP
+vm2_ip_address  = "192.168.1.101"   # your vm IP
