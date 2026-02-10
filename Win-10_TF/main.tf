@@ -24,7 +24,7 @@ provider "proxmox" {
 # Machine specs
 locals {
   vms = {
-    Test-Machine-1 = {
+    Workstation01 = {
       cores       = 4
       memory      = 4096
       disk        = 32
@@ -32,7 +32,7 @@ locals {
       netmask     = 24
       net_bridge  = "vmbr1"
     }
-    Test-Machine-2 = {
+    ShopFloorPC = {
       cores       = 4
       memory      = 4096
       disk        = 32
@@ -66,7 +66,8 @@ resource "proxmox_virtual_environment_file" "cloud_init_script" {
     try {
         # Set hostname
         Write-Host "Setting hostname to ${each.key}..."
-        Rename-Computer -NewName "${each.key}" -Force
+        Rename-Computer -NewName "
+}" -Force
 
         # Get network adapter
         $adapter = Get-NetAdapter | Where-Object {

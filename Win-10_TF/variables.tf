@@ -22,12 +22,6 @@ variable "proxmox_insecure" {
   default     = true
 }
 
-variable "admin_password" {
-  description = "Allow insecure SSL connections"
-  type        = string
-  sensitive   = true
-}
-
 variable "proxmox_ssh_username" {
   description = "Proxmox username for ssh acess"
   type        = string

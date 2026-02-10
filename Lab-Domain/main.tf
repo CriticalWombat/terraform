@@ -1,0 +1,88 @@
+terraform {
+  required_providers {
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = "0.70.0"
+    }
+  }
+}
+
+provider "proxmox" {
+  endpoint  = var.proxmox_endpoint
+  username  = var.proxmox_username
+  api_token = var.proxmox_api_token
+  insecure  = var.proxmox_insecure
+
+  ssh {
+    agent    = false
+    username = var.proxmox_ssh_username
+    password = var.proxmox_ssh_password
+  }
+}
+
+# ============================================
+# DOMAIN CONTROLLER MODULE
+# ============================================
+
+module "domain_controller" {
+  source = "./modules/domain-controller"
+
+  # VM Configuration
+  vm_name           = "AD01"
+  vm_id             = 800
+  node_name         = "pve"
+  template_id       = 9100
+  datastore_id      = "zfs-pool1"
+
+  # Network Configuration
+  temp_ip           = "10.27.51.10"
+  final_ip          = var.dc_ip
+  gateway           = "10.27.51.1"
+
+  # Credentials
+  admin_username    = var.admin_username
+  admin_password    = var.admin_password
+
+  # Domain Configuration
+  domain_name         = var.domain_name
+  domain_netbios_name = var.domain_netbios_name
+  safe_mode_password  = var.safe_mode_password
+
+  # Scripts path
+  scripts_path = "${path.root}/scripts"
+}
+
+# ============================================
+# WINDOWS CLIENTS MODULE
+# ============================================
+
+module "windows_clients" {
+  source = "./modules/windows-clients"
+
+  # Only create if DC is ready
+  depends_on = [module.domain_controller]
+
+  # VM Configuration
+  node_name      = "pve"
+  template_id    = 8001
+  datastore_id   = "zfs-pool1"
+  client_count   = var.client_count
+
+  # Network Configuration
+  client_ip_prefix = "10.27.51."
+  gateway          = "10.27.51.1"
+  dc_ip            = module.domain_controller.final_ip
+
+  # Credentials
+  admin_username = var.admin_username
+  admin_password = var.admin_password
+
+  # Domain Configuration
+  domain_name = var.domain_name
+
+  # Scripts path
+  scripts_path = "${path.root}/scripts"
+
+  # Ensure DC is verified before creating clients
+  dc_verified = module.domain_controller.dc_verified
+}
