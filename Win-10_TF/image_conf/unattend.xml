@@ -64,6 +64,7 @@
 
             <!-- First logon commands -->
             <FirstLogonCommands>
+                <!-- Enable RDP -->
                 <SynchronousCommand wcm:action="add">
                     <Order>1</Order>
                     <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0"</CommandLine>
@@ -74,10 +75,59 @@
                     <CommandLine>powershell -ExecutionPolicy Bypass -Command "Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'"</CommandLine>
                     <Description>Enable RDP Firewall Rule</Description>
                 </SynchronousCommand>
+
+                <!-- WinRM Configuration -->
                 <SynchronousCommand wcm:action="add">
                     <Order>3</Order>
-                    <CommandLine>cmd /c "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\Python\Scripts\cloudbase-init.exe" --config-file "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\cloudbase-init.conf"</CommandLine>
-                    <Description>Run Cloudbase-Init</Description>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
+                    <Description>Enable PowerShell Remoting</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>4</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $true -Force"</CommandLine>
+                    <Description>Allow WinRM Unencrypted</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>5</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Item WSMan:\localhost\Service\Auth\Basic -Value $true -Force"</CommandLine>
+                    <Description>Enable WinRM Basic Auth</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>6</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Item WSMan:\localhost\Client\Auth\Basic -Value $true -Force"</CommandLine>
+                    <Description>Enable WinRM Client Basic Auth</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>7</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Item WSMan:\localhost\Client\TrustedHosts -Value '*' -Force"</CommandLine>
+                    <Description>Set WinRM Trusted Hosts</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>8</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "$cert = New-SelfSignedCertificate -DnsName $env:COMPUTERNAME -CertStoreLocation Cert:\LocalMachine\My; Get-ChildItem WSMan:\Localhost\Listener | Where-Object {$_.Keys -contains 'Transport=HTTPS'} | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; New-Item -Path WSMan:\Localhost\Listener -Transport HTTPS -Address * -CertificateThumbPrint $cert.Thumbprint -Force"</CommandLine>
+                    <Description>Create WinRM HTTPS Listener</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>9</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "New-NetFirewallRule -Name 'WinRM-HTTP' -DisplayName 'WinRM HTTP' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 5985 -ErrorAction SilentlyContinue"</CommandLine>
+                    <Description>WinRM HTTP Firewall Rule</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>10</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "New-NetFirewallRule -Name 'WinRM-HTTPS' -DisplayName 'WinRM HTTPS' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 5986 -ErrorAction SilentlyContinue"</CommandLine>
+                    <Description>WinRM HTTPS Firewall Rule</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>11</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Service WinRM -StartupType Automatic; Restart-Service WinRM"</CommandLine>
+                    <Description>Set WinRM to Auto Start and Restart</Description>
+                </SynchronousCommand>
+
+                <!-- Run Cloudbase-Init (if installed) -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>12</Order>
+                    <CommandLine>cmd /c if exist "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\Python\Scripts\cloudbase-init.exe" "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\Python\Scripts\cloudbase-init.exe" --config-file "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\cloudbase-init.conf"</CommandLine>
+                    <Description>Run Cloudbase-Init if present</Description>
                 </SynchronousCommand>
             </FirstLogonCommands>
         </component>
