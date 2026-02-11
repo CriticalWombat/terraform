@@ -8,7 +8,7 @@ variable "proxmox_endpoint" {
 }
 
 variable "proxmox_username" {
-  description = "Proxmox username"
+  description = "Proxmox username (e.g., root@pam)"
   type        = string
 }
 
@@ -40,13 +40,13 @@ variable "proxmox_ssh_password" {
 # ============================================
 
 variable "admin_username" {
-  description = "Admin username for all VMs"
+  description = "Administrator username for all VMs"
   type        = string
   default     = "Administrator"
 }
 
 variable "admin_password" {
-  description = "Admin password for all VMs"
+  description = "Administrator password for all VMs"
   type        = string
   sensitive   = true
 }
@@ -71,12 +71,6 @@ variable "safe_mode_password" {
   description = "Safe mode administrator password for DC"
   type        = string
   sensitive   = true
-}
-
-variable "dc_ip" {
-  description = "Final static IP for Domain Controller"
-  type        = string
-  default     = "10.27.51.10"
 }
 
 # ============================================

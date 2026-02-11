@@ -1,0 +1,22 @@
+# Copy this file to terraform.tfvars and fill in your values
+# cp terraform.tfvars.example terraform.tfvars
+
+# Proxmox Connection
+proxmox_endpoint     = "https://your-proxmox-ip:8006"
+proxmox_username     = "root@pam"
+proxmox_api_token    = "your-api-token"
+proxmox_insecure     = true
+proxmox_ssh_username = "root"
+proxmox_ssh_password = "your-ssh-password"
+
+# VM Credentials
+admin_username = "Administrator"
+admin_password = "ChangeMe123!"
+
+# Domain Configuration
+domain_name         = "contoso.local"
+domain_netbios_name = "CONTOSO"
+safe_mode_password  = "SafeM0de!123"
+
+# Client Configuration
+client_count = 2

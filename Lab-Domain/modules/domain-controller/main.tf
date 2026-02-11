@@ -30,7 +30,7 @@ resource "proxmox_virtual_environment_vm" "dc" {
   }
 
   network_device {
-    bridge = "vmbr1"
+    bridge = "vmbr0"
     model  = "virtio"
   }
 
@@ -42,6 +42,7 @@ resource "proxmox_virtual_environment_vm" "dc" {
 
   agent {
     enabled = true
+    timeout = "60s"
   }
 
   lifecycle {
@@ -49,77 +50,15 @@ resource "proxmox_virtual_environment_vm" "dc" {
   }
 }
 
+# Wait for VM to boot and guest agent to report IP
 resource "time_sleep" "wait_for_boot" {
   depends_on      = [proxmox_virtual_environment_vm.dc]
-  create_duration = "500s"
+  create_duration = "4m"
 }
 
-# ============================================
-# SET STATIC IP
-# ============================================
-
-resource "null_resource" "upload_ip_script" {
-  depends_on = [time_sleep.wait_for_boot]
-
-  triggers = {
-    vm_id       = proxmox_virtual_environment_vm.dc.id
-    script_hash = filemd5("${var.scripts_path}/set-static-ip.ps1")
-  }
-
-  connection {
-    type     = "winrm"
-    host     = var.temp_ip
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "10m"
-    use_ntlm = true
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "powershell.exe -Command \"New-Item -ItemType Directory -Force -Path C:\\terraform-scripts\""
-    ]
-  }
-
-  provisioner "file" {
-    source      = "${var.scripts_path}/set-static-ip.ps1"
-    destination = "C:\\terraform-scripts\\set-static-ip.ps1"
-  }
-}
-
-resource "null_resource" "set_static_ip" {
-  depends_on = [null_resource.upload_ip_script]
-
-  triggers = {
-    vm_id    = proxmox_virtual_environment_vm.dc.id
-    final_ip = var.final_ip
-  }
-
-  connection {
-    type     = "winrm"
-    host     = var.temp_ip
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "10m"
-    use_ntlm = true
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\set-static-ip.ps1 -IPAddress '${var.final_ip}' -PrefixLength 24 -DefaultGateway '${var.gateway}' -DnsServers '1.1.1.1','1.0.0.1'"
-    ]
-  }
-}
-
-resource "time_sleep" "wait_after_ip_change" {
-  depends_on      = [null_resource.set_static_ip]
-  create_duration = "30s"
+# Extract DHCP IP from guest agent
+locals {
+  dc_ip = proxmox_virtual_environment_vm.dc.ipv4_addresses[0][0]
 }
 
 # ============================================
@@ -127,16 +66,17 @@ resource "time_sleep" "wait_after_ip_change" {
 # ============================================
 
 resource "null_resource" "upload_scripts" {
-  depends_on = [time_sleep.wait_after_ip_change]
+  depends_on = [time_sleep.wait_for_boot]
 
   triggers = {
     vm_id       = proxmox_virtual_environment_vm.dc.id
     script_hash = filemd5("${var.scripts_path}/promote-dc.ps1")
+    dc_ip       = local.dc_ip
   }
 
   connection {
     type     = "winrm"
-    host     = var.final_ip
+    host     = local.dc_ip  # Dynamic DHCP IP!
     user     = var.admin_username
     password = var.admin_password
     port     = 5986
@@ -144,6 +84,13 @@ resource "null_resource" "upload_scripts" {
     insecure = true
     timeout  = "10m"
     use_ntlm = true
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "powershell.exe -Command \"Write-Host 'Connected to DC at ${local.dc_ip}'\"",
+      "powershell.exe -Command \"New-Item -ItemType Directory -Force -Path C:\\terraform-scripts\""
+    ]
   }
 
   provisioner "file" {
@@ -171,7 +118,7 @@ resource "null_resource" "configure_winrm" {
 
   connection {
     type     = "winrm"
-    host     = var.final_ip
+    host     = local.dc_ip
     user     = var.admin_username
     password = var.admin_password
     port     = 5986
@@ -197,7 +144,7 @@ resource "null_resource" "install_adds_role" {
 
   connection {
     type     = "winrm"
-    host     = var.final_ip
+    host     = local.dc_ip
     user     = var.admin_username
     password = var.admin_password
     port     = 5986
@@ -224,7 +171,7 @@ resource "null_resource" "promote_dc" {
 
   connection {
     type     = "winrm"
-    host     = var.final_ip
+    host     = local.dc_ip
     user     = var.admin_username
     password = var.admin_password
     port     = 5986
@@ -255,7 +202,7 @@ resource "null_resource" "verify_dc" {
 
   connection {
     type     = "winrm"
-    host     = var.final_ip
+    host     = local.dc_ip
     user     = var.admin_username
     password = var.admin_password
     port     = 5986

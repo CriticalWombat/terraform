@@ -8,14 +8,14 @@ output "vm_name" {
   value       = proxmox_virtual_environment_vm.dc.name
 }
 
-output "temp_ip" {
-  description = "Temporary IP address"
-  value       = var.temp_ip
+output "dc_ip" {
+  description = "DC IP address (from DHCP via guest agent)"
+  value       = proxmox_virtual_environment_vm.dc.ipv4_addresses[0][0]
 }
 
-output "final_ip" {
-  description = "Final static IP address"
-  value       = var.final_ip
+output "all_ips" {
+  description = "All IPs reported by guest agent (for debugging)"
+  value       = proxmox_virtual_environment_vm.dc.ipv4_addresses
 }
 
 output "dc_verified" {
