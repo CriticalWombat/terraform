@@ -35,7 +35,7 @@
             <!-- Auto logon configuration (optional) -->
             <AutoLogon>
                 <Password>
-                    <Value>ChangeMe123!</Value>
+                    <Value>LocalAdmin123!</Value>
                     <PlainText>true</PlainText>
                 </Password>
                 <Enabled>true</Enabled>
@@ -45,7 +45,7 @@
             <!-- Administrator account password -->
             <UserAccounts>
                 <AdministratorPassword>
-                    <Value>ChangeMe123!</Value>
+                    <Value>LocalAdmin123!</Value>
                     <PlainText>true</PlainText>
                 </AdministratorPassword>
             </UserAccounts>
