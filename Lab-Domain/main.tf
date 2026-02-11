@@ -2,7 +2,7 @@ terraform {
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = "0.70.0"
+      version = "0.95.0"
     }
   }
 }
@@ -33,8 +33,6 @@ module "domain_controller" {
   node_name    = "pve"
   template_id  = 9100
   datastore_id = "zfs-pool1"
-
-  # No IP configuration needed - DHCP handles it!
 
   # Credentials
   admin_username = var.admin_username
