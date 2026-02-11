@@ -28,20 +28,17 @@ module "domain_controller" {
   source = "./modules/domain-controller"
 
   # VM Configuration
-  vm_name           = "AD01"
-  vm_id             = 800
-  node_name         = "pve"
-  template_id       = 9100
-  datastore_id      = "zfs-pool1"
+  vm_name      = "AD01"
+  vm_id        = 8000
+  node_name    = "pve"
+  template_id  = 9100
+  datastore_id = "zfs-pool1"
 
-  # Network Configuration
-  temp_ip           = "10.27.51.10"
-  final_ip          = var.dc_ip
-  gateway           = "10.27.51.1"
+  # No IP configuration needed - DHCP handles it!
 
   # Credentials
-  admin_username    = var.admin_username
-  admin_password    = var.admin_password
+  admin_username = var.admin_username
+  admin_password = var.admin_password
 
   # Domain Configuration
   domain_name         = var.domain_name
@@ -63,15 +60,14 @@ module "windows_clients" {
   depends_on = [module.domain_controller]
 
   # VM Configuration
-  node_name      = "pve"
-  template_id    = 8001
-  datastore_id   = "zfs-pool1"
-  client_count   = var.client_count
+  node_name       = "pve"
+  template_id     = 8001
+  datastore_id    = "zfs-pool1"
+  client_count    = var.client_count
+  network_bridge  = "vmbr0"
 
-  # Network Configuration
-  client_ip_prefix = "10.27.51."
-  gateway          = "10.27.51.1"
-  dc_ip            = module.domain_controller.final_ip
+  # DC IP (dynamically discovered)
+  dc_ip = module.domain_controller.dc_ip
 
   # Credentials
   admin_username = var.admin_username

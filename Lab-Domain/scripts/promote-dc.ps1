@@ -1,3 +1,4 @@
+# Promote server to Domain Controller
 param(
     [Parameter(Mandatory=$true)]
     [string]$DomainName,
@@ -11,52 +12,39 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "=========================================="
-Write-Host "DC PROMOTION SCRIPT"
-Write-Host "Domain: $DomainName"
-Write-Host "NetBIOS: $NetBiosName"
-Write-Host "=========================================="
+Write-Host "Starting DC promotion for domain: $DomainName"
 
 # Check if already a DC
-try {
-    $computerSystem = Get-WmiObject Win32_ComputerSystem
-    $domainRole = $computerSystem.DomainRole
-
-    if ($domainRole -ge 4) {
-        Write-Host "✓ This server is already a Domain Controller"
-        Write-Host "  Domain: $($computerSystem.Domain)"
-        exit 0
-    }
-} catch {
-    Write-Host "Server is not yet a DC. Proceeding with promotion..."
+$domainRole = (Get-WmiObject Win32_ComputerSystem).DomainRole
+if ($domainRole -ge 4) {
+    Write-Host "This server is already a Domain Controller"
+    exit 0
 }
 
-# Convert password to secure string
-$securePassword = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
-
-Write-Host ""
-Write-Host "Promoting to Domain Controller..."
-Write-Host "This will take 10-20 minutes and the server will reboot."
-Write-Host ""
+# Convert safe mode password to secure string
+$SecureSafeModePassword = ConvertTo-SecureString $SafeModePassword -AsPlainText -Force
 
 try {
+    # Install AD DS Forest
+    Write-Host "Installing AD DS Forest..."
     Install-ADDSForest `
         -DomainName $DomainName `
         -DomainNetbiosName $NetBiosName `
-        -SafeModeAdministratorPassword $securePassword `
+        -DomainMode "WinThreshold" `
+        -ForestMode "WinThreshold" `
         -InstallDns:$true `
         -CreateDnsDelegation:$false `
         -DatabasePath "C:\Windows\NTDS" `
         -LogPath "C:\Windows\NTDS" `
         -SysvolPath "C:\Windows\SYSVOL" `
-        -DomainMode "WinThreshold" `
-        -ForestMode "WinThreshold" `
-        -Force:$true `
-        -NoRebootOnCompletion:$false
+        -SafeModeAdministratorPassword $SecureSafeModePassword `
+        -NoRebootOnCompletion:$false `
+        -Force:$true
 
-    Write-Host "✓ DC promotion initiated. Server will reboot."
-} catch {
-    Write-Error "✗ Failed to promote DC: $_"
-    Write-Error "Error details: $($_.Exception.Message)"
+    Write-Host "DC promotion initiated successfully. Server will reboot."
+    exit 0
+}
+catch {
+    Write-Host "ERROR: DC promotion failed - $_"
     exit 1
 }

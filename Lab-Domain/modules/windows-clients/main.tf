@@ -8,29 +8,32 @@ terraform {
 }
 
 # ============================================
-# CLIENT VMS
+# LOCALS - Client VM Configuration
 # ============================================
 
 locals {
+  # Create client VM config (IPs will be discovered)
   client_vms = {
     for i in range(var.client_count) :
     "WIN10-${i + 1}" => {
-      cores    = 2
-      memory   = 4096
-      disk     = 32
-      temp_ip  = "${var.client_ip_prefix}${151 + i}"
-      final_ip = "${var.client_ip_prefix}${11 + i}"
-      netmask  = 24
+      vm_id  = 200 + i
+      cores  = 2
+      memory = 4096
+      disk   = 32
     }
   }
 }
+
+# ============================================
+# CLIENT VMS
+# ============================================
 
 resource "proxmox_virtual_environment_vm" "clients" {
   for_each = local.client_vms
 
   name      = each.key
   node_name = var.node_name
-  vm_id     = 200 + index(keys(local.client_vms), each.key)
+  vm_id     = each.value.vm_id
 
   clone {
     vm_id = var.template_id
@@ -46,7 +49,7 @@ resource "proxmox_virtual_environment_vm" "clients" {
   }
 
   network_device {
-    bridge = "vmbr1"
+    bridge = var.network_bridge
     model  = "virtio"
   }
 
@@ -58,6 +61,7 @@ resource "proxmox_virtual_environment_vm" "clients" {
 
   agent {
     enabled = true
+    timeout = "60s"
   }
 
   lifecycle {
@@ -67,102 +71,38 @@ resource "proxmox_virtual_environment_vm" "clients" {
 
 resource "time_sleep" "wait_for_boot" {
   depends_on      = [proxmox_virtual_environment_vm.clients]
-  create_duration = "90s"
+  create_duration = "180s"
+}
+
+# Extract DHCP IPs from guest agent for each client
+locals {
+  client_ips = {
+    for name, vm in proxmox_virtual_environment_vm.clients :
+    name => vm.ipv4_addresses[0][0]
+  }
 }
 
 # ============================================
-# SET STATIC IPs
-# ============================================
-
-resource "null_resource" "upload_ip_script" {
-  for_each = local.client_vms
-
-  depends_on = [time_sleep.wait_for_boot]
-
-  triggers = {
-    vm_id       = proxmox_virtual_environment_vm.clients[each.key].id
-    script_hash = filemd5("${var.scripts_path}/set-static-ip.ps1")
-  }
-
-  connection {
-    type     = "winrm"
-    host     = each.value.temp_ip
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "10m"
-    use_ntlm = true
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "powershell.exe -Command \"New-Item -ItemType Directory -Force -Path C:\\terraform-scripts\""
-    ]
-  }
-
-  provisioner "file" {
-    source      = "${var.scripts_path}/set-static-ip.ps1"
-    destination = "C:\\terraform-scripts\\set-static-ip.ps1"
-  }
-}
-
-resource "null_resource" "set_static_ip" {
-  for_each = local.client_vms
-
-  depends_on = [
-    null_resource.upload_ip_script
-  ]
-
-  triggers = {
-    vm_id      = proxmox_virtual_environment_vm.clients[each.key].id
-    final_ip   = each.value.final_ip
-    dc_verified = var.dc_verified  # Ensures DC is ready
-  }
-
-  connection {
-    type     = "winrm"
-    host     = each.value.temp_ip
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "10m"
-    use_ntlm = true
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      # Use DC IP dynamically!
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\set-static-ip.ps1 -IPAddress '${each.value.final_ip}' -PrefixLength ${each.value.netmask} -DefaultGateway '${var.gateway}' -DnsServers '${var.dc_ip}','1.1.1.1'"
-    ]
-  }
-}
-
-resource "time_sleep" "wait_after_ip_change" {
-  depends_on      = [null_resource.set_static_ip]
-  create_duration = "30s"
-}
-
-# ============================================
-# DOMAIN JOIN
+# UPLOAD SCRIPTS
 # ============================================
 
 resource "null_resource" "upload_scripts" {
   for_each = local.client_vms
 
-  depends_on = [time_sleep.wait_after_ip_change]
+  depends_on = [
+    time_sleep.wait_for_boot,
+    var.dc_verified
+  ]
 
   triggers = {
     vm_id       = proxmox_virtual_environment_vm.clients[each.key].id
     script_hash = filemd5("${var.scripts_path}/join-domain.ps1")
+    client_ip   = local.client_ips[each.key]
   }
 
   connection {
     type     = "winrm"
-    host     = each.value.final_ip
+    host     = local.client_ips[each.key]  # Dynamic DHCP IP!
     user     = var.admin_username
     password = var.admin_password
     port     = 5986
@@ -170,6 +110,13 @@ resource "null_resource" "upload_scripts" {
     insecure = true
     timeout  = "10m"
     use_ntlm = true
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "powershell.exe -Command \"Write-Host 'Connected to ${each.key} at ${local.client_ips[each.key]}'\"",
+      "powershell.exe -Command \"New-Item -ItemType Directory -Force -Path C:\\terraform-scripts\""
+    ]
   }
 
   provisioner "file" {
@@ -183,10 +130,52 @@ resource "null_resource" "upload_scripts" {
   }
 }
 
-resource "null_resource" "configure_winrm" {
+# ============================================
+# CONFIGURE DNS TO POINT TO DC
+# ============================================
+
+resource "null_resource" "configure_dns" {
   for_each = local.client_vms
 
   depends_on = [null_resource.upload_scripts]
+
+  triggers = {
+    vm_id = proxmox_virtual_environment_vm.clients[each.key].id
+    dc_ip = var.dc_ip
+  }
+
+  connection {
+    type     = "winrm"
+    host     = local.client_ips[each.key]
+    user     = var.admin_username
+    password = var.admin_password
+    port     = 5986
+    https    = true
+    insecure = true
+    timeout  = "10m"
+    use_ntlm = true
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "powershell.exe -ExecutionPolicy Bypass -Command \"Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Set-DnsClientServerAddress -ServerAddresses '${var.dc_ip}','1.1.1.1'\""
+    ]
+  }
+}
+
+resource "time_sleep" "wait_after_dns" {
+  depends_on      = [null_resource.configure_dns]
+  create_duration = "30s"
+}
+
+# ============================================
+# CONFIGURE WINRM
+# ============================================
+
+resource "null_resource" "configure_winrm" {
+  for_each = local.client_vms
+
+  depends_on = [time_sleep.wait_after_dns]
 
   triggers = {
     vm_id = proxmox_virtual_environment_vm.clients[each.key].id
@@ -194,7 +183,7 @@ resource "null_resource" "configure_winrm" {
 
   connection {
     type     = "winrm"
-    host     = each.value.final_ip
+    host     = local.client_ips[each.key]
     user     = var.admin_username
     password = var.admin_password
     port     = 5986
@@ -211,6 +200,10 @@ resource "null_resource" "configure_winrm" {
   }
 }
 
+# ============================================
+# JOIN DOMAIN
+# ============================================
+
 resource "null_resource" "join_domain" {
   for_each = local.client_vms
 
@@ -224,7 +217,7 @@ resource "null_resource" "join_domain" {
 
   connection {
     type     = "winrm"
-    host     = each.value.final_ip
+    host     = local.client_ips[each.key]
     user     = var.admin_username
     password = var.admin_password
     port     = 5986

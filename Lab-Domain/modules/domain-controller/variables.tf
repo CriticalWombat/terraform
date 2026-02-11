@@ -1,4 +1,3 @@
-# VM Configuration
 variable "vm_name" {
   description = "Name of the DC VM"
   type        = string
@@ -24,23 +23,6 @@ variable "datastore_id" {
   type        = string
 }
 
-# Network Configuration
-variable "temp_ip" {
-  description = "Temporary IP address from template"
-  type        = string
-}
-
-variable "final_ip" {
-  description = "Final static IP address"
-  type        = string
-}
-
-variable "gateway" {
-  description = "Network gateway"
-  type        = string
-}
-
-# Credentials
 variable "admin_username" {
   description = "Administrator username"
   type        = string
@@ -52,7 +34,6 @@ variable "admin_password" {
   sensitive   = true
 }
 
-# Domain Configuration
 variable "domain_name" {
   description = "Domain name (FQDN)"
   type        = string
@@ -69,7 +50,6 @@ variable "safe_mode_password" {
   sensitive   = true
 }
 
-# Scripts
 variable "scripts_path" {
   description = "Path to PowerShell scripts"
   type        = string
