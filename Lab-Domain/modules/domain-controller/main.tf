@@ -2,7 +2,7 @@ terraform {
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = "0.70.0"
+      version = "0.95.0"
     }
   }
 }
@@ -42,7 +42,10 @@ resource "proxmox_virtual_environment_vm" "dc" {
 
   agent {
     enabled = true
-    timeout = "60s"
+    timeout = "120s"
+    wait_for_ip {
+      ipv4 = true
+    }
   }
 
   lifecycle {
@@ -76,7 +79,7 @@ resource "null_resource" "upload_scripts" {
 
   connection {
     type     = "winrm"
-    host     = local.dc_ip  # Dynamic DHCP IP!
+    host     = local.dc_ip
     user     = var.admin_username
     password = var.admin_password
     port     = 5986
@@ -94,11 +97,6 @@ resource "null_resource" "upload_scripts" {
   }
 
   provisioner "file" {
-    source      = "${var.scripts_path}/configure-winrm.ps1"
-    destination = "C:\\terraform-scripts\\configure-winrm.ps1"
-  }
-
-  provisioner "file" {
     source      = "${var.scripts_path}/promote-dc.ps1"
     destination = "C:\\terraform-scripts\\promote-dc.ps1"
   }
@@ -109,34 +107,8 @@ resource "null_resource" "upload_scripts" {
   }
 }
 
-resource "null_resource" "configure_winrm" {
-  depends_on = [null_resource.upload_scripts]
-
-  triggers = {
-    vm_id = proxmox_virtual_environment_vm.dc.id
-  }
-
-  connection {
-    type     = "winrm"
-    host     = local.dc_ip
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "10m"
-    use_ntlm = true
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\configure-winrm.ps1"
-    ]
-  }
-}
-
 resource "null_resource" "install_adds_role" {
-  depends_on = [null_resource.configure_winrm]
+  depends_on = [null_resource.upload_scripts]
 
   triggers = {
     vm_id = proxmox_virtual_environment_vm.dc.id
@@ -183,7 +155,7 @@ resource "null_resource" "promote_dc" {
 
   provisioner "remote-exec" {
     inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\promote-dc.ps1 -DomainName '${var.domain_name}' -NetBiosName '${var.domain_netbios_name}' -SafeModePassword '${var.safe_mode_password}'"
+      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\promote-dc.ps1 -DomainName ${var.domain_name} -NetBiosName ${var.domain_netbios_name} -SafeModePassword ${var.safe_mode_password}"
     ]
   }
 }
