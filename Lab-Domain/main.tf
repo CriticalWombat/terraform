@@ -59,7 +59,7 @@ module "windows_clients" {
 
   # VM Configuration
   node_name       = "pve"
-  template_id     = 8001
+  template_id     = 100
   datastore_id    = "zfs-pool1"
   client_count    = var.client_count
   network_bridge  = "vmbr0"

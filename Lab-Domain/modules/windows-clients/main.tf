@@ -61,7 +61,10 @@ resource "proxmox_virtual_environment_vm" "clients" {
 
   agent {
     enabled = true
-    timeout = "60s"
+    timeout = "300s"
+    wait_for_ip {
+      ipv4 = true
+    }
   }
 
   lifecycle {
@@ -78,7 +81,10 @@ resource "time_sleep" "wait_for_boot" {
 locals {
   client_ips = {
     for name, vm in proxmox_virtual_environment_vm.clients :
-    name => vm.ipv4_addresses[0][0]
+    name => [
+      for ip in flatten(vm.ipv4_addresses) : ip
+      if !startswith(ip, "127.")
+    ][0]
   }
 }
 
