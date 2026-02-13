@@ -56,7 +56,7 @@ resource "proxmox_virtual_environment_vm" "dc" {
 # Wait for VM to boot and guest agent to report IP
 resource "time_sleep" "wait_for_boot" {
   depends_on      = [proxmox_virtual_environment_vm.dc]
-  create_duration = "4m"
+  create_duration = "5m"
 }
 
 # Extract DHCP IP from guest agent

@@ -17,7 +17,7 @@ locals {
     for i in range(var.client_count) :
     "WIN10-${i + 1}" => {
       vm_id  = 200 + i
-      cores  = 2
+      cores  = 4
       memory = 4096
       disk   = 32
     }
