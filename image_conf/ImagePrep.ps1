@@ -112,9 +112,16 @@ Write-OK "WinRM service started (Automatic)"
 # 1c. Bootstrap via native winrm.cmd - initialises the WSMan:\
 #     PSDrive that all subsequent Set-Item commands require.
 #     More reliable than going straight to Enable-PSRemoting on Win10.
+#     Wrapped in try/catch because quickconfig throws a WSManFault if
+#     WinRM is already configured (e.g. after a -SkipSysprep run),
+#     which would halt the script due to $ErrorActionPreference = Stop.
 Write-Verbose "Running winrm quickconfig..."
-$quickconfig = cmd /c winrm quickconfig -quiet -force 2>&1
-Write-OK "winrm quickconfig complete"
+try {
+    $quickconfig = cmd /c winrm quickconfig -quiet -force 2>&1
+    Write-OK "winrm quickconfig complete"
+} catch {
+    Write-OK "winrm quickconfig: already configured, continuing"
+}
 
 # 1d. Enable-PSRemoting now that the service and WSMan drive are up
 Write-Verbose "Enabling PSRemoting..."
