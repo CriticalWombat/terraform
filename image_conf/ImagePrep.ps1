@@ -106,7 +106,7 @@ Write-OK "Network profile set to Private"
 #     On Windows 10 WinRM is Manual/Stopped by default
 Write-Verbose "Starting WinRM service..."
 Set-Service WinRM -StartupType Automatic
-Start-Service WinRM
+Start-Service WinRM -ErrorAction SilentlyContinue  # no-op if already running
 Write-OK "WinRM service started (Automatic)"
 
 # 1c. Bootstrap via native winrm.cmd - initialises the WSMan:\
@@ -117,16 +117,26 @@ Write-OK "WinRM service started (Automatic)"
 #     which would halt the script due to $ErrorActionPreference = Stop.
 Write-Verbose "Running winrm quickconfig..."
 try {
-    $quickconfig = cmd /c winrm quickconfig -quiet -force 2>&1
+    $quickconfig = cmd /c winrm quickconfig -quiet -force
     Write-OK "winrm quickconfig complete"
 } catch {
     Write-OK "winrm quickconfig: already configured, continuing"
 }
 
-# 1d. Enable-PSRemoting now that the service and WSMan drive are up
+# 1d. Enable-PSRemoting now that the service and WSMan drive are up.
+#     Ensure the Windows Firewall service (MpsSvc) is running first -
+#     Enable-PSRemoting calls Set-WSManQuickConfig internally which tries
+#     to check firewall status and faults if MpsSvc is unavailable.
+#     Wrapped in try/catch because it also faults if WinRM is already
+#     fully configured (e.g. after a prior -SkipSysprep run).
 Write-Verbose "Enabling PSRemoting..."
-Enable-PSRemoting -Force -SkipNetworkProfileCheck
-Write-OK "PSRemoting enabled"
+try {
+    Start-Service MpsSvc -ErrorAction SilentlyContinue
+    Enable-PSRemoting -Force -SkipNetworkProfileCheck
+    Write-OK "PSRemoting enabled"
+} catch {
+    Write-OK "PSRemoting: already enabled or firewall check skipped, continuing"
+}
 
 # 1e. WSMan settings - using 1 instead of $true
 #     $true is not expanded correctly when launched from cmd/XML context
@@ -201,7 +211,7 @@ if ($svc.Status -eq "Running") {
 }
 
 # Check listener
-$listeners = winrm enumerate winrm/config/listener 2>&1
+$listeners = winrm enumerate winrm/config/listener
 if ($listeners -match "HTTPS") {
     Write-OK "HTTPS listener is present"
 } else {
@@ -220,7 +230,7 @@ if ($port5986) {
 
 # Check firewall rules
 $fwRule = Get-NetFirewallRule -Name "WinRM-HTTPS" -ErrorAction SilentlyContinue
-if ($fwRule -and $fwRule.Enabled) {
+if ($fwRule -and $fwRule.Enabled -eq "True") {
     Write-OK "WinRM-HTTPS firewall rule is enabled (Profile: $($fwRule.Profile))"
 } else {
     Write-FAIL "WinRM-HTTPS firewall rule missing or disabled"
@@ -349,7 +359,7 @@ $netKey = "HKLM:\SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BF
 if (Test-Path $netKey) {
     Get-ChildItem $netKey |
         Where-Object { $_.PSChildName -ne "Descriptions" } |
-        Remove-Item -Recurse -Force
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 ipconfig /flushdns | Out-Null
 Write-OK "NIC history and DNS cache cleared"
