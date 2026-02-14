@@ -74,7 +74,7 @@ resource "proxmox_virtual_environment_vm" "clients" {
 
 resource "time_sleep" "wait_for_boot" {
   depends_on      = [proxmox_virtual_environment_vm.clients]
-  create_duration = "180s"
+  create_duration = "600s"
 }
 
 # Extract DHCP IPs from guest agent for each client
