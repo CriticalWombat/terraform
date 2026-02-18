@@ -120,14 +120,9 @@ resource "null_resource" "upload_scripts" {
 
   provisioner "remote-exec" {
     inline = [
-      "powershell.exe -Command \"Write-Host 'Connected to ${each.key} at ${local.client_ips[each.key]}'\"",
-      "powershell.exe -Command \"New-Item -ItemType Directory -Force -Path C:\\terraform-scripts\""
+      "cmd /c echo Connected to ${each.key}",
+      "cmd /c mkdir C:\\terraform-scripts 2>nul || echo Directory already exists"
     ]
-  }
-
-  provisioner "file" {
-    source      = "${var.scripts_path}/configure-winrm.ps1"
-    destination = "C:\\terraform-scripts\\configure-winrm.ps1"
   }
 
   provisioner "file" {
@@ -175,45 +170,13 @@ resource "time_sleep" "wait_after_dns" {
 }
 
 # ============================================
-# CONFIGURE WINRM
-# ============================================
-
-resource "null_resource" "configure_winrm" {
-  for_each = local.client_vms
-
-  depends_on = [time_sleep.wait_after_dns]
-
-  triggers = {
-    vm_id = proxmox_virtual_environment_vm.clients[each.key].id
-  }
-
-  connection {
-    type     = "winrm"
-    host     = local.client_ips[each.key]
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "10m"
-    use_ntlm = true
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\configure-winrm.ps1"
-    ]
-  }
-}
-
-# ============================================
 # JOIN DOMAIN
 # ============================================
 
 resource "null_resource" "join_domain" {
   for_each = local.client_vms
 
-  depends_on = [null_resource.configure_winrm]
+  depends_on = [time_sleep.wait_after_dns]
 
   triggers = {
     vm_id       = proxmox_virtual_environment_vm.clients[each.key].id

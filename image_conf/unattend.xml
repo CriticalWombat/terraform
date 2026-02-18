@@ -12,6 +12,7 @@
 
     <settings pass="specialize">
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+            <!-- * tells Windows to generate a unique random hostname for each clone -->
             <ComputerName>*</ComputerName>
             <TimeZone>Eastern Standard Time</TimeZone>
         </component>
@@ -20,6 +21,7 @@
                 <RunSynchronousCommand wcm:action="add">
                     <Order>1</Order>
                     <Path>net user Administrator /active:yes</Path>
+                    <Description>Enable built-in Administrator account</Description>
                 </RunSynchronousCommand>
             </RunSynchronous>
         </component>
@@ -27,6 +29,7 @@
 
     <settings pass="oobeSystem">
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+
             <AutoLogon>
                 <Password>
                     <Value>LocalAdmin123!</Value>
@@ -35,12 +38,14 @@
                 <Enabled>true</Enabled>
                 <Username>Administrator</Username>
             </AutoLogon>
+
             <UserAccounts>
                 <AdministratorPassword>
                     <Value>LocalAdmin123!</Value>
                     <PlainText>true</PlainText>
                 </AdministratorPassword>
             </UserAccounts>
+
             <OOBE>
                 <HideEULAPage>true</HideEULAPage>
                 <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
@@ -51,84 +56,48 @@
                 <SkipUserOOBE>true</SkipUserOOBE>
                 <SkipMachineOOBE>true</SkipMachineOOBE>
             </OOBE>
+
             <FirstLogonCommands>
+
+                <!-- Order 1: Enable RDP via registry -->
                 <SynchronousCommand wcm:action="add">
                     <Order>1</Order>
                     <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0"</CommandLine>
                     <Description>Enable RDP</Description>
                 </SynchronousCommand>
+
+                <!-- Order 2: Open RDP firewall rule -->
                 <SynchronousCommand wcm:action="add">
                     <Order>2</Order>
                     <CommandLine>powershell -ExecutionPolicy Bypass -Command "Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'"</CommandLine>
                     <Description>Enable RDP Firewall Rule</Description>
                 </SynchronousCommand>
+
+                <!--
+                    Order 3: Configure WinRM by calling the pre-staged script.
+
+                    winrm-setup.ps1 was copied into C:\Windows\Setup\Scripts\ by
+                    Prepare-Template.ps1 before sysprep ran. It now runs here with
+                    $env:COMPUTERNAME already set to this clone's unique hostname,
+                    so the self-signed cert it generates will have the correct CN.
+
+                -->
                 <SynchronousCommand wcm:action="add">
                     <Order>3</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Service WinRM -StartupType Automatic; Start-Service WinRM"</CommandLine>
-                    <Description>Start WinRM Service</Description>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -File "C:\Windows\Setup\Scripts\winrm-setup.ps1"</CommandLine>
+                    <Description>Configure WinRM - generates fresh cert bound to this clone's hostname</Description>
                 </SynchronousCommand>
+
+                <!-- Order 4: Run Cloudbase-Init if present (Proxmox cloud-init integration) -->
                 <SynchronousCommand wcm:action="add">
                     <Order>4</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"</CommandLine>
-                    <Description>Set Network Profile to Private</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>5</Order>
-                    <CommandLine>cmd /c winrm quickconfig -quiet -force</CommandLine>
-                    <Description>WinRM Quick Config</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>6</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
-                    <Description>Enable PowerShell Remoting</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>7</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value 1 -Force"</CommandLine>
-                    <Description>Allow WinRM Unencrypted</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>8</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Item WSMan:\localhost\Service\Auth\Basic -Value 1 -Force"</CommandLine>
-                    <Description>Enable WinRM Basic Auth</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>9</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Item WSMan:\localhost\Client\Auth\Basic -Value 1 -Force"</CommandLine>
-                    <Description>Enable WinRM Client Basic Auth</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>10</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-Item WSMan:\localhost\Client\TrustedHosts -Value '*' -Force"</CommandLine>
-                    <Description>Set WinRM Trusted Hosts</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>11</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "$cert = New-SelfSignedCertificate -DnsName $env:COMPUTERNAME -CertStoreLocation Cert:\LocalMachine\My; Get-ChildItem WSMan:\Localhost\Listener | Where-Object {$_.Keys -contains 'Transport=HTTPS'} | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; New-Item -Path WSMan:\Localhost\Listener -Transport HTTPS -Address * -CertificateThumbPrint $cert.Thumbprint -Force"</CommandLine>
-                    <Description>Create WinRM HTTPS Listener</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>12</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "New-NetFirewallRule -Name 'WinRM-HTTP' -DisplayName 'WinRM HTTP' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 5985 -Profile Any -ErrorAction SilentlyContinue"</CommandLine>
-                    <Description>WinRM HTTP Firewall Rule</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>13</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "New-NetFirewallRule -Name 'WinRM-HTTPS' -DisplayName 'WinRM HTTPS' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 5986 -Profile Any -ErrorAction SilentlyContinue"</CommandLine>
-                    <Description>WinRM HTTPS Firewall Rule</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>14</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Restart-Service WinRM"</CommandLine>
-                    <Description>Restart WinRM</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>15</Order>
                     <CommandLine>cmd /c if exist "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\Python\Scripts\cloudbase-init.exe" "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\Python\Scripts\cloudbase-init.exe" --config-file "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\cloudbase-init.conf"</CommandLine>
                     <Description>Run Cloudbase-Init if present</Description>
                 </SynchronousCommand>
+
             </FirstLogonCommands>
         </component>
+
         <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <InputLocale>en-US</InputLocale>
             <SystemLocale>en-US</SystemLocale>
@@ -136,4 +105,5 @@
             <UserLocale>en-US</UserLocale>
         </component>
     </settings>
+
 </unattend>

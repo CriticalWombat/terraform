@@ -2,38 +2,50 @@
 <#
 .SYNOPSIS
     Prepares a fresh Windows 10 VM as a Proxmox/Terraform template.
-    Configures WinRM correctly, applies best-practice cleanup, then
-    runs sysprep with the provided unattend.xml.
+    Applies best-practice cleanup, then runs sysprep with the provided
+    unattend.xml.
 
 .DESCRIPTION
     Run this script on a FRESH Windows 10 VM (not a clone) before
     converting to a Proxmox template. It will:
 
-      1.  Configure WinRM in the correct order so it works on Windows 10
-      2.  Verify WinRM is reachable before proceeding
-      3.  Apply pre-sysprep best-practice cleanup
-      4.  Place the unattend.xml and launch sysprep
+      1.  Apply pre-sysprep best-practice cleanup
+      2.  Wipe WinRM listeners and the LocalMachine\My cert store so
+          no template cert survives into clones
+      3.  Place the unattend.xml and launch sysprep
 
     The VM will shut down automatically when sysprep completes.
     After shutdown, convert the VM to a template in Proxmox.
 
+    WinRM is NOT configured here. Configuration happens on each clone's
+    first boot via FirstLogonCommands in unattend.xml, which calls
+    winrm-setup.ps1. That script generates a fresh self-signed cert
+    bound to the clone's own hostname.
+
 .PARAMETER UnattendPath
     Full path to your unattend.xml. Defaults to the script's own directory.
 
+.PARAMETER WinRMScriptPath
+    Full path to winrm-setup.ps1. Defaults to the script's own directory.
+    This script is copied into the template image at
+    C:\Windows\Setup\Scripts\ so FirstLogonCommands can call it on each
+    clone's first boot.
+
 .PARAMETER SkipSysprep
     Run all configuration and cleanup steps but do NOT launch sysprep.
-    Useful for testing WinRM connectivity before committing to a sysprep.
+    Useful for testing before committing to a sysprep.
 
 .EXAMPLE
-    # Full run - configures, cleans up, sysprepped and shuts down
+    # Full run - cleans up, sysprepped and shuts down
     .\Prepare-Template.ps1
 
-    # Test WinRM works without sysprepping yet
+    # Test cleanup steps without sysprepping yet
     .\Prepare-Template.ps1 -SkipSysprep
 #>
 
 param(
-    [string]$UnattendPath = "$PSScriptRoot\unattend.xml",
+    [string]$UnattendPath   = "$PSScriptRoot\unattend.xml",
+    [string]$WinRMScriptPath = "$PSScriptRoot\winrm-setup.ps1",
     [switch]$SkipSysprep
 )
 
@@ -67,17 +79,7 @@ if ($osCaption -notmatch "Windows 10") {
     Write-Warning "This script targets Windows 10. Detected: $osCaption. Continuing anyway..."
 }
 
-# Confirm unattend exists before doing anything destructive
-if (-not $SkipSysprep) {
-    if (-not (Test-Path $UnattendPath)) {
-        Write-FAIL "unattend.xml not found at: $UnattendPath"
-        Write-Host "  Place your unattend.xml next to this script or pass -UnattendPath" -ForegroundColor Red
-        exit 1
-    }
-    Write-OK "unattend.xml found at: $UnattendPath"
-}
-
-# Confirm running as SYSTEM or Administrator
+# Confirm running as Administrator
 $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal   = New-Object Security.Principal.WindowsPrincipal($currentUser)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -86,161 +88,23 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 Write-OK "Running as Administrator"
 
+if (-not $SkipSysprep) {
+    # Confirm unattend exists before doing anything destructive
+    if (-not (Test-Path $UnattendPath)) {
+        Write-FAIL "unattend.xml not found at: $UnattendPath"
+        Write-Host "  Place your unattend.xml next to this script or pass -UnattendPath" -ForegroundColor Red
+        exit 1
+    }
+    Write-OK "unattend.xml found at: $UnattendPath"
 
-# ============================================================
-# STEP 1: CONFIGURE WINRM
-# Done FIRST so you can test connectivity before sysprep.
-# The unattend will reconfigure WinRM on each clone's first
-# boot - this step is for validating the base image works.
-# ============================================================
-
-Write-Step "Step 1: Configuring WinRM"
-
-# 1a. Force network profile to Private - MUST happen before
-#     quickconfig or listener rules get scoped to Public profile
-Write-Verbose "Setting network profile to Private..."
-Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue
-Write-OK "Network profile set to Private"
-
-# 1b. Set WinRM to Automatic and start it
-#     On Windows 10 WinRM is Manual/Stopped by default
-Write-Verbose "Starting WinRM service..."
-Set-Service WinRM -StartupType Automatic
-Start-Service WinRM -ErrorAction SilentlyContinue  # no-op if already running
-Write-OK "WinRM service started (Automatic)"
-
-# 1c. Bootstrap via native winrm.cmd - initialises the WSMan:\
-#     PSDrive that all subsequent Set-Item commands require.
-#     More reliable than going straight to Enable-PSRemoting on Win10.
-#     Wrapped in try/catch because quickconfig throws a WSManFault if
-#     WinRM is already configured (e.g. after a -SkipSysprep run),
-#     which would halt the script due to $ErrorActionPreference = Stop.
-Write-Verbose "Running winrm quickconfig..."
-try {
-    $quickconfig = cmd /c winrm quickconfig -quiet -force
-    Write-OK "winrm quickconfig complete"
-} catch {
-    Write-OK "winrm quickconfig: already configured, continuing"
+    # Confirm winrm-setup.ps1 exists - it must be staged into the image
+    if (-not (Test-Path $WinRMScriptPath)) {
+        Write-FAIL "winrm-setup.ps1 not found at: $WinRMScriptPath"
+        Write-Host "  Place winrm-setup.ps1 next to this script or pass -WinRMScriptPath" -ForegroundColor Red
+        exit 1
+    }
+    Write-OK "winrm-setup.ps1 found at: $WinRMScriptPath"
 }
-
-# 1d. Enable-PSRemoting now that the service and WSMan drive are up.
-#     Ensure the Windows Firewall service (MpsSvc) is running first -
-#     Enable-PSRemoting calls Set-WSManQuickConfig internally which tries
-#     to check firewall status and faults if MpsSvc is unavailable.
-#     Wrapped in try/catch because it also faults if WinRM is already
-#     fully configured (e.g. after a prior -SkipSysprep run).
-Write-Verbose "Enabling PSRemoting..."
-try {
-    Start-Service MpsSvc -ErrorAction SilentlyContinue
-    Enable-PSRemoting -Force -SkipNetworkProfileCheck
-    Write-OK "PSRemoting enabled"
-} catch {
-    Write-OK "PSRemoting: already enabled or firewall check skipped, continuing"
-}
-
-# 1e. WSMan settings - using 1 instead of $true
-#     $true is not expanded correctly when launched from cmd/XML context
-Write-Verbose "Configuring WSMan settings..."
-Set-Item WSMan:\localhost\Service\AllowUnencrypted  -Value 1 -Force
-Set-Item WSMan:\localhost\Service\Auth\Basic        -Value 1 -Force
-Set-Item WSMan:\localhost\Client\Auth\Basic         -Value 1 -Force
-Set-Item WSMan:\localhost\Client\TrustedHosts       -Value '*' -Force
-Write-OK "WSMan auth settings configured"
-
-# 1f. Create HTTPS listener with a self-signed cert
-Write-Verbose "Creating HTTPS listener..."
-$cert = New-SelfSignedCertificate `
-    -DnsName $env:COMPUTERNAME `
-    -CertStoreLocation Cert:\LocalMachine\My `
-    -NotAfter (Get-Date).AddYears(5)
-
-# Remove any existing HTTPS listeners before creating new one
-Get-ChildItem WSMan:\Localhost\Listener |
-    Where-Object { $_.Keys -contains 'Transport=HTTPS' } |
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
-New-Item -Path WSMan:\Localhost\Listener `
-    -Transport HTTPS `
-    -Address * `
-    -CertificateThumbPrint $cert.Thumbprint `
-    -Force | Out-Null
-
-Write-OK "HTTPS listener created (cert thumbprint: $($cert.Thumbprint))"
-
-# 1g. Firewall rules - Profile Any ensures they apply regardless
-#     of whether the network profile is Public, Private, or Domain
-Write-Verbose "Creating firewall rules..."
-
-# Remove any existing WinRM rules first to avoid conflicts
-@("WinRM-HTTP", "WinRM-HTTPS",
-  "Windows Remote Management (HTTP-In)",
-  "Windows Remote Management (HTTPS-In)") | ForEach-Object {
-    Remove-NetFirewallRule -Name $_ -ErrorAction SilentlyContinue
-    Remove-NetFirewallRule -DisplayName $_ -ErrorAction SilentlyContinue
-}
-
-New-NetFirewallRule -Name "WinRM-HTTP" -DisplayName "WinRM HTTP" `
-    -Enabled True -Direction Inbound -Protocol TCP `
-    -Action Allow -LocalPort 5985 -Profile Any | Out-Null
-
-New-NetFirewallRule -Name "WinRM-HTTPS" -DisplayName "WinRM HTTPS" `
-    -Enabled True -Direction Inbound -Protocol TCP `
-    -Action Allow -LocalPort 5986 -Profile Any | Out-Null
-
-Write-OK "Firewall rules created (Profile: Any)"
-
-# 1h. Restart WinRM to apply everything cleanly
-Restart-Service WinRM
-Write-OK "WinRM restarted"
-
-
-# ============================================================
-# STEP 2: VERIFY WINRM IS WORKING LOCALLY
-# If this fails, sysprep won't help - fix WinRM first.
-# ============================================================
-
-Write-Step "Step 2: Verifying WinRM locally"
-
-# Check service
-$svc = Get-Service WinRM
-if ($svc.Status -eq "Running") {
-    Write-OK "WinRM service is Running"
-} else {
-    Write-FAIL "WinRM service is NOT running - status: $($svc.Status)"
-    exit 1
-}
-
-# Check listener
-$listeners = winrm enumerate winrm/config/listener
-if ($listeners -match "HTTPS") {
-    Write-OK "HTTPS listener is present"
-} else {
-    Write-FAIL "No HTTPS listener found. Output: $listeners"
-    exit 1
-}
-
-# Check port is actually listening
-$port5986 = Get-NetTCPConnection -LocalPort 5986 -State Listen -ErrorAction SilentlyContinue
-if ($port5986) {
-    Write-OK "Port 5986 is listening"
-} else {
-    Write-FAIL "Nothing listening on port 5986"
-    exit 1
-}
-
-# Check firewall rules
-$fwRule = Get-NetFirewallRule -Name "WinRM-HTTPS" -ErrorAction SilentlyContinue
-if ($fwRule -and $fwRule.Enabled -eq "True") {
-    Write-OK "WinRM-HTTPS firewall rule is enabled (Profile: $($fwRule.Profile))"
-} else {
-    Write-FAIL "WinRM-HTTPS firewall rule missing or disabled"
-    exit 1
-}
-
-Write-Host "`n  WinRM verification passed. Test remote connectivity now." -ForegroundColor Green
-Write-Host "  From your Terraform host run:" -ForegroundColor Yellow
-Write-Host "    nc -zv $((Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch '^127\.' } | Select-Object -First 1).IPAddress) 5986" -ForegroundColor White
-Write-Host "`n  If nc succeeds, press Enter to continue with cleanup and sysprep." -ForegroundColor Yellow
 
 if ($SkipSysprep) {
     Write-Host "`n  -SkipSysprep specified. Stopping here." -ForegroundColor Cyan
@@ -252,14 +116,14 @@ Read-Host "`n  Press Enter to continue with cleanup and sysprep (Ctrl+C to abort
 
 
 # ============================================================
-# STEP 3: PRE-SYSPREP CLEANUP
+# STEP 1: PRE-SYSPREP CLEANUP
 # ============================================================
 
-Write-Step "Step 3: Pre-sysprep cleanup"
+Write-Step "Step 1: Pre-sysprep cleanup"
 
 $ErrorActionPreference = "SilentlyContinue"
 
-# 3a. Reset sysprep generalization count
+# 1a. Reset sysprep generalization count
 #     Windows blocks sysprep after 3 runs - this resets the counter
 Write-Verbose "Resetting sysprep state..."
 $sysprepKey = "HKLM:\SYSTEM\Setup\Status\SysprepStatus"
@@ -271,13 +135,13 @@ Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Softw
     -Name "SkipRearm" -Value 1 -Force
 Write-OK "Sysprep state reset"
 
-# 3b. Rearm Windows activation
+# 1b. Rearm Windows activation
 Write-Verbose "Rearming activation..."
 & cscript //nologo C:\Windows\System32\slmgr.vbs /rearm
 Write-OK "Activation rearmed"
 
-# 3c. Clear Panther cache - THIS is what caused your unattend to not apply.
-#     Windows caches the unattend here and uses it instead of the Sysprep copy.
+# 1c. Clear Panther cache - Windows caches the unattend here and uses
+#     it instead of the Sysprep copy if not cleared first.
 Write-Verbose "Clearing Panther cache..."
 @(
     "C:\Windows\Panther",
@@ -297,7 +161,7 @@ Write-Verbose "Clearing Panther cache..."
 }
 Write-OK "Panther cache cleared"
 
-# 3d. Clear Windows Update cache
+# 1d. Clear Windows Update cache
 Write-Verbose "Clearing Windows Update cache..."
 Stop-Service wuauserv, bits -Force
 @(
@@ -309,14 +173,14 @@ Stop-Service wuauserv, bits -Force
 Start-Service wuauserv, bits
 Write-OK "Windows Update cache cleared"
 
-# 3e. Clear temp files
+# 1e. Clear temp files
 Write-Verbose "Clearing temp files..."
 @($env:TEMP, $env:TMP, "C:\Windows\Temp", "C:\Windows\Prefetch") | ForEach-Object {
     if (Test-Path $_) { Remove-Item "$_\*" -Recurse -Force }
 }
 Write-OK "Temp files cleared"
 
-# 3f. Remove non-default user profiles
+# 1f. Remove non-default user profiles
 Write-Verbose "Removing non-default user profiles..."
 Get-CimInstance Win32_UserProfile |
     Where-Object {
@@ -331,7 +195,7 @@ Get-CimInstance Win32_UserProfile |
         }
     }
 
-# 3g. Clear event logs
+# 1g. Clear event logs
 Write-Verbose "Clearing event logs..."
 Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
     Where-Object { $_.RecordCount -gt 0 } | ForEach-Object {
@@ -341,7 +205,35 @@ Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
     }
 Write-OK "Event logs cleared"
 
-# 3h. Reset CloudBase-Init state if installed
+# 1h. Wipe WinRM listeners and LocalMachine\My cert store.
+#
+#     CRITICAL: This prevents the template cert CN mismatch bug.
+#     Any cert left in LocalMachine\My will survive sysprep into every
+#     clone. The clone's hostname will not match the cert CN, causing
+#     SSL handshake failures on every WinRM HTTPS connection.
+#
+#     WinRM is NOT configured here - that happens on each clone's first
+#     boot via winrm-setup.ps1 called from FirstLogonCommands, where
+#     $env:COMPUTERNAME is already the clone's correct unique hostname.
+Write-Verbose "Wiping WinRM listeners and cert store..."
+
+Get-ChildItem WSMan:\Localhost\Listener -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+$store = New-Object System.Security.Cryptography.X509Certificates.X509Store("My", "LocalMachine")
+$store.Open("ReadWrite")
+@($store.Certificates) | ForEach-Object {
+    try {
+        $store.Remove($_)
+        Write-Verbose "  [OK] Removed cert: $($_.Subject) ($($_.Thumbprint))"
+    } catch {
+        Write-Verbose "  [SKIP] Could not remove cert: $($_.Thumbprint)"
+    }
+}
+$store.Close()
+Write-OK "WinRM listeners and all LocalMachine\My certs wiped"
+
+# 1i. Reset CloudBase-Init state if installed
 $cbLog = "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\log"
 $cbKey = "HKLM:\SOFTWARE\Cloudbase Solutions\cloudbase-init"
 if (Test-Path $cbLog) {
@@ -353,7 +245,7 @@ if (Test-Path $cbKey) {
     Write-OK "CloudBase-Init registry state cleared"
 }
 
-# 3i. Clear NIC history to prevent ghost adapters in clones
+# 1j. Clear NIC history to prevent ghost adapters in clones
 Write-Verbose "Clearing NIC history..."
 $netKey = "HKLM:\SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}"
 if (Test-Path $netKey) {
@@ -364,7 +256,7 @@ if (Test-Path $netKey) {
 ipconfig /flushdns | Out-Null
 Write-OK "NIC history and DNS cache cleared"
 
-# 3j. Disk cleanup
+# 1k. Disk cleanup
 Write-Verbose "Running disk cleanup..."
 $cleanupKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches"
 Get-ChildItem $cleanupKey | ForEach-Object {
@@ -377,10 +269,31 @@ $ErrorActionPreference = "Stop"
 
 
 # ============================================================
-# STEP 4: PLACE UNATTEND AND RUN SYSPREP
+# STEP 2: STAGE winrm-setup.ps1 INTO THE IMAGE
+#
+# FirstLogonCommands in unattend.xml calls this script by path
+# on each clone's first boot. It must exist in the image before
+# sysprep runs - we copy it here rather than relying on the
+# unattend to write it, keeping the unattend simple and avoiding
+# any inline script quoting issues.
 # ============================================================
 
-Write-Step "Step 4: Sysprep"
+Write-Step "Step 2: Staging winrm-setup.ps1"
+
+$scriptDest = "C:\Windows\Setup\Scripts"
+if (-not (Test-Path $scriptDest)) {
+    New-Item -ItemType Directory -Path $scriptDest -Force | Out-Null
+}
+
+Copy-Item $WinRMScriptPath "$scriptDest\winrm-setup.ps1" -Force
+Write-OK "winrm-setup.ps1 staged to $scriptDest\winrm-setup.ps1"
+
+
+# ============================================================
+# STEP 3: PLACE UNATTEND AND RUN SYSPREP
+# ============================================================
+
+Write-Step "Step 3: Sysprep"
 
 $sysprepUnattend = "C:\Windows\System32\Sysprep\unattend.xml"
 
