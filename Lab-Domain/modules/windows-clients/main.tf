@@ -61,7 +61,7 @@ resource "proxmox_virtual_environment_vm" "clients" {
 
   agent {
     enabled = true
-    timeout = "300s"
+    timeout = "100s"
     wait_for_ip {
       ipv4 = true
     }
@@ -74,7 +74,7 @@ resource "proxmox_virtual_environment_vm" "clients" {
 
 resource "time_sleep" "wait_for_boot" {
   depends_on      = [proxmox_virtual_environment_vm.clients]
-  create_duration = "600s"
+  create_duration = "120s"
 }
 
 # Extract DHCP IPs from guest agent for each client
@@ -108,7 +108,7 @@ resource "null_resource" "upload_scripts" {
 
   connection {
     type     = "winrm"
-    host     = local.client_ips[each.key]  # Dynamic DHCP IP!
+    host     = local.client_ips[each.key]
     user     = var.admin_username
     password = var.admin_password
     port     = 5986
@@ -153,7 +153,7 @@ resource "null_resource" "configure_dns" {
     port     = 5986
     https    = true
     insecure = true
-    timeout  = "10m"
+    timeout  = "5m"
     use_ntlm = true
   }
 
@@ -198,7 +198,7 @@ resource "null_resource" "join_domain" {
 
   provisioner "remote-exec" {
     inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\join-domain.ps1 -DomainName '${var.domain_name}' -DomainUser '${var.admin_username}' -DomainPassword '${var.admin_password}'"
+      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\join-domain.ps1 -DomainName ${var.domain_name} -DomainUser ${var.admin_username} -DomainPassword ${var.admin_password}"
     ]
   }
 }

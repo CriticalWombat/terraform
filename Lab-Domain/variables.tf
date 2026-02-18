@@ -80,5 +80,5 @@ variable "safe_mode_password" {
 variable "client_count" {
   description = "Number of Windows 10 clients to create"
   type        = number
-  default     = 2
+  default     = 1
 }
