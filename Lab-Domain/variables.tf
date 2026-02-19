@@ -15,7 +15,7 @@ variable "proxmox_username" {
 variable "proxmox_api_token" {
   description = "Proxmox API token"
   type        = string
-  sensitive   = true
+
 }
 
 variable "proxmox_insecure" {
@@ -32,7 +32,7 @@ variable "proxmox_ssh_username" {
 variable "proxmox_ssh_password" {
   description = "Proxmox SSH password"
   type        = string
-  sensitive   = true
+
 }
 
 # ============================================
@@ -48,7 +48,7 @@ variable "admin_username" {
 variable "admin_password" {
   description = "Administrator password for all VMs"
   type        = string
-  sensitive   = true
+
 }
 
 # ============================================
@@ -70,7 +70,7 @@ variable "domain_netbios_name" {
 variable "safe_mode_password" {
   description = "Safe mode administrator password for DC"
   type        = string
-  sensitive   = true
+
 }
 
 # ============================================

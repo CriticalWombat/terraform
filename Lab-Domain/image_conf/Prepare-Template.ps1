@@ -127,9 +127,12 @@ $ErrorActionPreference = "SilentlyContinue"
 #     Windows blocks sysprep after 3 runs - this resets the counter
 Write-Verbose "Resetting sysprep state..."
 $sysprepKey = "HKLM:\SYSTEM\Setup\Status\SysprepStatus"
+$setupKey   = "HKLM:\SYSTEM\Setup"
 if (Test-Path $sysprepKey) {
-    Set-ItemProperty -Path $sysprepKey -Name "GeneralizationState" -Value 7 -Force
-    Set-ItemProperty -Path $sysprepKey -Name "CleanupState"        -Value 2 -Force
+    Set-ItemProperty -Path $sysprepKey -Name "GeneralizationState"      -Value 7 -Force
+    Set-ItemProperty -Path $sysprepKey -Name "CleanupState"             -Value 2 -Force
+    Set-ItemProperty -Path $setupKey   -Name "SetupType"                -Value 4 -Force
+    Set-ItemProperty -Path $setupKey   -Name "SystemSetupInProgress"    -Value 1 -Force
 }
 Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform" `
     -Name "SkipRearm" -Value 1 -Force
