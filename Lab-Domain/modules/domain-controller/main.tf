@@ -42,7 +42,7 @@ resource "proxmox_virtual_environment_vm" "dc" {
 
   agent {
     enabled = true
-    timeout = "120s"
+    timeout = "600s"
     wait_for_ip {
       ipv4 = true
     }

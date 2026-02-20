@@ -77,7 +77,7 @@
                 <!--
                     Order 3: Configure WinRM by calling the pre-staged script.
 
-                    winrm-setup.ps1 was copied into C:\Windows\Setup\Scripts\ by
+                    setup.ps1 was copied into C:\Windows\Setup\Scripts\ by
                     Prepare-Template.ps1 before sysprep ran. It now runs here with
                     $env:COMPUTERNAME already set to this clone's unique hostname,
                     so the self-signed cert it generates will have the correct CN.

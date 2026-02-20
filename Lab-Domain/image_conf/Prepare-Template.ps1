@@ -19,14 +19,14 @@
 
     WinRM is NOT configured here. Configuration happens on each clone's
     first boot via FirstLogonCommands in unattend.xml, which calls
-    winrm-setup.ps1. That script generates a fresh self-signed cert
+    setup.ps1. That script generates a fresh self-signed cert
     bound to the clone's own hostname.
 
 .PARAMETER UnattendPath
     Full path to your unattend.xml. Defaults to the script's own directory.
 
 .PARAMETER WinRMScriptPath
-    Full path to winrm-setup.ps1. Defaults to the script's own directory.
+    Full path to setup.ps1. Defaults to the script's own directory.
     This script is copied into the template image at
     C:\Windows\Setup\Scripts\ so FirstLogonCommands can call it on each
     clone's first boot.
@@ -45,7 +45,7 @@
 
 param(
     [string]$UnattendPath   = "$PSScriptRoot\unattend.xml",
-    [string]$WinRMScriptPath = "$PSScriptRoot\winrm-setup.ps1",
+    [string]$WinRMScriptPath = "$PSScriptRoot\setup.ps1",
     [switch]$SkipSysprep
 )
 
@@ -97,13 +97,13 @@ if (-not $SkipSysprep) {
     }
     Write-OK "unattend.xml found at: $UnattendPath"
 
-    # Confirm winrm-setup.ps1 exists - it must be staged into the image
+    # Confirm setup.ps1 exists - it must be staged into the image
     if (-not (Test-Path $WinRMScriptPath)) {
-        Write-FAIL "winrm-setup.ps1 not found at: $WinRMScriptPath"
-        Write-Host "  Place winrm-setup.ps1 next to this script or pass -WinRMScriptPath" -ForegroundColor Red
+        Write-FAIL "setup.ps1 not found at: $WinRMScriptPath"
+        Write-Host "  Place setup.ps1 next to this script or pass -WinRMScriptPath" -ForegroundColor Red
         exit 1
     }
-    Write-OK "winrm-setup.ps1 found at: $WinRMScriptPath"
+    Write-OK "setup.ps1 found at: $WinRMScriptPath"
 }
 
 if ($SkipSysprep) {
@@ -144,12 +144,6 @@ Write-Verbose "Rearming activation..."
 Write-OK "Activation rearmed"
 
 # 1c. Clear Panther cache - Windows caches the unattend here and uses
-#     it instead of the Sysprep copy if not cleared first.
-#
-#     NOTE: Remove-Item -Recurse on the directory itself rather than
-#     Get-ChildItem -File, which only deletes top-level files and leaves
-#     subdirectories intact. Stale unattend fragments in subdirectories
-#     can cause Windows to merge or override your sysprep unattend.
 Write-Verbose "Clearing Panther cache..."
 @(
     "C:\Windows\Panther",
@@ -214,17 +208,6 @@ Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
         } catch { }
     }
 Write-OK "Event logs cleared"
-
-# 1h. Wipe WinRM listeners and LocalMachine\My cert store.
-#
-#     CRITICAL: This prevents the template cert CN mismatch bug.
-#     Any cert left in LocalMachine\My will survive sysprep into every
-#     clone. The clone's hostname will not match the cert CN, causing
-#     SSL handshake failures on every WinRM HTTPS connection.
-#
-#     WinRM is NOT configured here - that happens on each clone's first
-#     boot via winrm-setup.ps1 called from FirstLogonCommands, where
-#     $env:COMPUTERNAME is already the clone's correct unique hostname.
 Write-Verbose "Wiping WinRM listeners and cert store..."
 
 Get-ChildItem WSMan:\Localhost\Listener -ErrorAction SilentlyContinue |
@@ -243,19 +226,7 @@ $store.Open("ReadWrite")
 $store.Close()
 Write-OK "WinRM listeners and all LocalMachine\My certs wiped"
 
-# 1i. Reset CloudBase-Init state if installed
-$cbLog = "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\log"
-$cbKey = "HKLM:\SOFTWARE\Cloudbase Solutions\cloudbase-init"
-if (Test-Path $cbLog) {
-    Remove-Item "$cbLog\*" -Recurse -Force
-    Write-OK "CloudBase-Init logs cleared"
-}
-if (Test-Path $cbKey) {
-    Remove-Item $cbKey -Recurse -Force
-    Write-OK "CloudBase-Init registry state cleared"
-}
-
-# 1j. Clear NIC history to prevent ghost adapters in clones
+# 1i. Clear NIC history to prevent ghost adapters in clones
 Write-Verbose "Clearing NIC history..."
 $netKey = "HKLM:\SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}"
 if (Test-Path $netKey) {
@@ -279,7 +250,7 @@ $ErrorActionPreference = "Stop"
 
 
 # ============================================================
-# STEP 2: STAGE winrm-setup.ps1 INTO THE IMAGE
+# STEP 2: STAGE setup.ps1 INTO THE IMAGE
 #
 # FirstLogonCommands in unattend.xml calls this script by path
 # on each clone's first boot. It must exist in the image before
@@ -288,15 +259,15 @@ $ErrorActionPreference = "Stop"
 # any inline script quoting issues.
 # ============================================================
 
-Write-Step "Step 2: Staging winrm-setup.ps1"
+Write-Step "Step 2: Staging setup.ps1"
 
 $scriptDest = "C:\Windows\Setup\Scripts"
 if (-not (Test-Path $scriptDest)) {
     New-Item -ItemType Directory -Path $scriptDest -Force | Out-Null
 }
 
-Copy-Item $WinRMScriptPath "$scriptDest\winrm-setup.ps1" -Force
-Write-OK "winrm-setup.ps1 staged to $scriptDest\winrm-setup.ps1"
+Copy-Item $WinRMScriptPath "$scriptDest\setup.ps1" -Force
+Write-OK "setup.ps1 staged to $scriptDest\setup.ps1"
 
 
 # ============================================================
