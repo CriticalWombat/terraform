@@ -12,6 +12,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Before joining the domain, remove autologin behavior for localadmin account
+Write-Host "Removing auto-login for local admin"
+
+$regPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+
+Set-ItemProperty -Path $regPath -Name "AutoAdminLogon" -Value "0"
+Remove-ItemProperty -Path $regPath -Name "DefaultUserName" -ErrorAction SilentlyContinue
+
 Write-Host "Attempting to join domain: $DomainName"
 
 # Check if already domain-joined

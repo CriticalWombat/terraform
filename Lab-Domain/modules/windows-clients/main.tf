@@ -17,7 +17,7 @@ locals {
     for i in range(var.client_count) :
     "WIN10-${i + 1}" => {
       vm_id  = 200 + i
-      cores  = 2
+      cores  = 4
       memory = 4096
       disk   = 32
     }
@@ -61,7 +61,10 @@ resource "proxmox_virtual_environment_vm" "clients" {
 
   agent {
     enabled = true
-    timeout = "60s"
+    timeout = "600s"
+    wait_for_ip {
+      ipv4 = true
+    }
   }
 
   lifecycle {
@@ -69,16 +72,19 @@ resource "proxmox_virtual_environment_vm" "clients" {
   }
 }
 
-resource "time_sleep" "wait_for_boot" {
+resource "time_sleep" "wait_for_initial_boot" {
   depends_on      = [proxmox_virtual_environment_vm.clients]
-  create_duration = "180s"
+  create_duration = "10m"
 }
 
 # Extract DHCP IPs from guest agent for each client
 locals {
   client_ips = {
     for name, vm in proxmox_virtual_environment_vm.clients :
-    name => vm.ipv4_addresses[0][0]
+    name => [
+      for ip in flatten(vm.ipv4_addresses) : ip
+      if !startswith(ip, "127.")
+    ][0]
   }
 }
 
@@ -90,7 +96,7 @@ resource "null_resource" "upload_scripts" {
   for_each = local.client_vms
 
   depends_on = [
-    time_sleep.wait_for_boot,
+    time_sleep.wait_for_initial_boot,
     var.dc_verified
   ]
 
@@ -102,7 +108,7 @@ resource "null_resource" "upload_scripts" {
 
   connection {
     type     = "winrm"
-    host     = local.client_ips[each.key]  # Dynamic DHCP IP!
+    host     = local.client_ips[each.key]
     user     = var.admin_username
     password = var.admin_password
     port     = 5986
@@ -114,14 +120,9 @@ resource "null_resource" "upload_scripts" {
 
   provisioner "remote-exec" {
     inline = [
-      "powershell.exe -Command \"Write-Host 'Connected to ${each.key} at ${local.client_ips[each.key]}'\"",
-      "powershell.exe -Command \"New-Item -ItemType Directory -Force -Path C:\\terraform-scripts\""
+      "cmd /c echo Connected to ${each.key}",
+      "cmd /c mkdir C:\\terraform-scripts 2>nul || echo Directory already exists"
     ]
-  }
-
-  provisioner "file" {
-    source      = "${var.scripts_path}/configure-winrm.ps1"
-    destination = "C:\\terraform-scripts\\configure-winrm.ps1"
   }
 
   provisioner "file" {
@@ -152,7 +153,7 @@ resource "null_resource" "configure_dns" {
     port     = 5986
     https    = true
     insecure = true
-    timeout  = "10m"
+    timeout  = "5m"
     use_ntlm = true
   }
 
@@ -169,45 +170,13 @@ resource "time_sleep" "wait_after_dns" {
 }
 
 # ============================================
-# CONFIGURE WINRM
-# ============================================
-
-resource "null_resource" "configure_winrm" {
-  for_each = local.client_vms
-
-  depends_on = [time_sleep.wait_after_dns]
-
-  triggers = {
-    vm_id = proxmox_virtual_environment_vm.clients[each.key].id
-  }
-
-  connection {
-    type     = "winrm"
-    host     = local.client_ips[each.key]
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "10m"
-    use_ntlm = true
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\configure-winrm.ps1"
-    ]
-  }
-}
-
-# ============================================
 # JOIN DOMAIN
 # ============================================
 
 resource "null_resource" "join_domain" {
   for_each = local.client_vms
 
-  depends_on = [null_resource.configure_winrm]
+  depends_on = [time_sleep.wait_after_dns]
 
   triggers = {
     vm_id       = proxmox_virtual_environment_vm.clients[each.key].id
@@ -229,7 +198,7 @@ resource "null_resource" "join_domain" {
 
   provisioner "remote-exec" {
     inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\join-domain.ps1 -DomainName '${var.domain_name}' -DomainUser '${var.admin_username}' -DomainPassword '${var.admin_password}'"
+      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\join-domain.ps1 -DomainName ${var.domain_name} -DomainUser ${var.admin_username}@${var.domain_name} -DomainPassword ${var.admin_password}"
     ]
   }
 }
