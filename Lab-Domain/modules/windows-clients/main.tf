@@ -61,7 +61,7 @@ resource "proxmox_virtual_environment_vm" "clients" {
 
   agent {
     enabled = true
-    timeout = "100s"
+    timeout = "600s"
     wait_for_ip {
       ipv4 = true
     }
@@ -72,9 +72,9 @@ resource "proxmox_virtual_environment_vm" "clients" {
   }
 }
 
-resource "time_sleep" "wait_for_boot" {
+resource "time_sleep" "wait_for_initial_boot" {
   depends_on      = [proxmox_virtual_environment_vm.clients]
-  create_duration = "120s"
+  create_duration = "10m"
 }
 
 # Extract DHCP IPs from guest agent for each client
@@ -96,7 +96,7 @@ resource "null_resource" "upload_scripts" {
   for_each = local.client_vms
 
   depends_on = [
-    time_sleep.wait_for_boot,
+    time_sleep.wait_for_initial_boot,
     var.dc_verified
   ]
 

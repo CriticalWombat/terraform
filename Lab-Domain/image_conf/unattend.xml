@@ -88,15 +88,8 @@
                 -->
                 <SynchronousCommand wcm:action="add">
                     <Order>3</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -File "C:\Windows\Setup\Scripts\winrm-setup.ps1"</CommandLine>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -File "C:\Windows\Setup\Scripts\setup.ps1"</CommandLine>
                     <Description>Configure WinRM - generates fresh cert bound to this clone's hostname</Description>
-                </SynchronousCommand>
-
-                <!-- Order 4: Run Cloudbase-Init if present (Proxmox cloud-init integration) -->
-                <SynchronousCommand wcm:action="add">
-                    <Order>4</Order>
-                    <CommandLine>cmd /c if exist "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\Python\Scripts\cloudbase-init.exe" "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\Python\Scripts\cloudbase-init.exe" --config-file "C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\cloudbase-init.conf"</CommandLine>
-                    <Description>Run Cloudbase-Init if present</Description>
                 </SynchronousCommand>
 
             </FirstLogonCommands>
