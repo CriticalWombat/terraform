@@ -198,7 +198,7 @@ resource "null_resource" "join_domain" {
 
   provisioner "remote-exec" {
     inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\join-domain.ps1 -DomainName ${var.domain_name} -DomainUser ${var.admin_username} -DomainPassword ${var.admin_password}"
+      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\join-domain.ps1 -DomainName ${var.domain_name} -DomainUser ${var.admin_username}@${var.domain_name} -DomainPassword ${var.admin_password}"
     ]
   }
 }
