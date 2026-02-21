@@ -37,7 +37,7 @@ output "client_ips" {
 
 output "rdp_commands" {
   description = "RDP connection commands"
-  sensitive   = true
+  sensitive   = false
   value = merge(
     {
       dc = "xfreerdp /v:${module.domain_controller.dc_ip} /u:${var.admin_username} /p:${var.admin_password}"

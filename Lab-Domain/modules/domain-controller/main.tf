@@ -42,7 +42,7 @@ resource "proxmox_virtual_environment_vm" "dc" {
 
   agent {
     enabled = true
-    timeout = "120s"
+    timeout = "600s"
     wait_for_ip {
       ipv4 = true
     }
@@ -56,7 +56,7 @@ resource "proxmox_virtual_environment_vm" "dc" {
 # Wait for VM to boot and guest agent to report IP
 resource "time_sleep" "wait_for_boot" {
   depends_on      = [proxmox_virtual_environment_vm.dc]
-  create_duration = "4m"
+  create_duration = "5m"
 }
 
 # Extract DHCP IP from guest agent
@@ -89,12 +89,12 @@ resource "null_resource" "upload_scripts" {
     use_ntlm = true
   }
 
-  provisioner "remote-exec" {
-    inline = [
-      "powershell.exe -Command \"Write-Host 'Connected to DC at ${local.dc_ip}'\"",
-      "powershell.exe -Command \"New-Item -ItemType Directory -Force -Path C:\\terraform-scripts\""
-    ]
-  }
+provisioner "remote-exec" {
+  inline = [
+    "cmd /c echo Connected to DC at ${local.dc_ip}",
+    "cmd /c mkdir C:\\terraform-scripts 2>nul || echo Directory already exists"
+  ]
+}
 
   provisioner "file" {
     source      = "${var.scripts_path}/promote-dc.ps1"
@@ -171,6 +171,7 @@ resource "null_resource" "verify_dc" {
   triggers = {
     dc_promotion = null_resource.promote_dc.id
   }
+
 
   connection {
     type     = "winrm"

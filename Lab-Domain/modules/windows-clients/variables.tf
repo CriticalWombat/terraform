@@ -37,7 +37,7 @@ variable "admin_username" {
 variable "admin_password" {
   description = "Administrator password"
   type        = string
-  sensitive   = true
+  sensitive   = false
 }
 
 variable "domain_name" {

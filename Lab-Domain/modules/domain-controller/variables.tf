@@ -31,7 +31,7 @@ variable "admin_username" {
 variable "admin_password" {
   description = "Administrator password"
   type        = string
-  sensitive   = true
+  sensitive   = false
 }
 
 variable "domain_name" {
@@ -47,7 +47,7 @@ variable "domain_netbios_name" {
 variable "safe_mode_password" {
   description = "Safe mode password"
   type        = string
-  sensitive   = true
+  sensitive   = false
 }
 
 variable "scripts_path" {
