@@ -2,31 +2,22 @@ terraform {
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = "0.95.0"
+      version = "~> 0.95"
     }
   }
 }
-
-# ============================================
-# LOCALS - Client VM Configuration
-# ============================================
 
 locals {
-  # Create client VM config (IPs will be discovered)
   client_vms = {
     for i in range(var.client_count) :
-    "WIN10-${i + 1}" => {
-      vm_id  = 200 + i
+    format("WIN10-%02d", i + 1) => {
+      vm_id  = var.vm_id_base + i
       cores  = 4
       memory = 4096
-      disk   = 32
+      disk   = 60
     }
   }
 }
-
-# ============================================
-# CLIENT VMS
-# ============================================
 
 resource "proxmox_virtual_environment_vm" "clients" {
   for_each = local.client_vms
@@ -61,7 +52,7 @@ resource "proxmox_virtual_environment_vm" "clients" {
 
   agent {
     enabled = true
-    timeout = "600s"
+    timeout = "1200s"
     wait_for_ip {
       ipv4 = true
     }
@@ -72,73 +63,26 @@ resource "proxmox_virtual_environment_vm" "clients" {
   }
 }
 
-resource "time_sleep" "wait_for_initial_boot" {
+resource "time_sleep" "wait_for_winrm" {
   depends_on      = [proxmox_virtual_environment_vm.clients]
-  create_duration = "10m"
+  create_duration = "5m"
 }
 
-# Extract DHCP IPs from guest agent for each client
 locals {
   client_ips = {
     for name, vm in proxmox_virtual_environment_vm.clients :
     name => [
-      for ip in flatten(vm.ipv4_addresses) : ip
-      if !startswith(ip, "127.")
+      for ip in flatten(vm.ipv4_addresses) :
+      ip if !startswith(ip, "127.")
     ][0]
   }
 }
 
-# ============================================
-# UPLOAD SCRIPTS
-# ============================================
-
-resource "null_resource" "upload_scripts" {
+# Set DC as DNS server then join the domain
+resource "null_resource" "configure_and_join" {
   for_each = local.client_vms
 
-  depends_on = [
-    time_sleep.wait_for_initial_boot,
-    var.dc_verified
-  ]
-
-  triggers = {
-    vm_id       = proxmox_virtual_environment_vm.clients[each.key].id
-    script_hash = filemd5("${var.scripts_path}/join-domain.ps1")
-    client_ip   = local.client_ips[each.key]
-  }
-
-  connection {
-    type     = "winrm"
-    host     = local.client_ips[each.key]
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "10m"
-    use_ntlm = true
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "cmd /c echo Connected to ${each.key}",
-      "cmd /c mkdir C:\\terraform-scripts 2>nul || echo Directory already exists"
-    ]
-  }
-
-  provisioner "file" {
-    source      = "${var.scripts_path}/join-domain.ps1"
-    destination = "C:\\terraform-scripts\\join-domain.ps1"
-  }
-}
-
-# ============================================
-# CONFIGURE DNS TO POINT TO DC
-# ============================================
-
-resource "null_resource" "configure_dns" {
-  for_each = local.client_vms
-
-  depends_on = [null_resource.upload_scripts]
+  depends_on = [time_sleep.wait_for_winrm]
 
   triggers = {
     vm_id = proxmox_virtual_environment_vm.clients[each.key].id
@@ -148,57 +92,30 @@ resource "null_resource" "configure_dns" {
   connection {
     type     = "winrm"
     host     = local.client_ips[each.key]
-    user     = var.admin_username
+    user     = "Administrator"
     password = var.admin_password
     port     = 5986
     https    = true
     insecure = true
-    timeout  = "5m"
+    timeout  = "30m"
     use_ntlm = true
   }
 
   provisioner "remote-exec" {
     inline = [
-      "powershell.exe -ExecutionPolicy Bypass -Command \"Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Set-DnsClientServerAddress -ServerAddresses '${var.dc_ip}','1.1.1.1'\""
+      "cmd /c mkdir C:\\setup 2>nul || exit 0",
+      "powershell.exe -Command \"Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Set-DnsClientServerAddress -ServerAddresses '${var.dc_ip}'\""
     ]
   }
-}
 
-resource "time_sleep" "wait_after_dns" {
-  depends_on      = [null_resource.configure_dns]
-  create_duration = "30s"
-}
-
-# ============================================
-# JOIN DOMAIN
-# ============================================
-
-resource "null_resource" "join_domain" {
-  for_each = local.client_vms
-
-  depends_on = [time_sleep.wait_after_dns]
-
-  triggers = {
-    vm_id       = proxmox_virtual_environment_vm.clients[each.key].id
-    script_hash = filemd5("${var.scripts_path}/join-domain.ps1")
-    dc_verified = var.dc_verified
-  }
-
-  connection {
-    type     = "winrm"
-    host     = local.client_ips[each.key]
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "15m"
-    use_ntlm = true
+  provisioner "file" {
+    source      = "${path.module}/scripts/join-domain.ps1"
+    destination = "C:\\setup\\join-domain.ps1"
   }
 
   provisioner "remote-exec" {
     inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\join-domain.ps1 -DomainName ${var.domain_name} -DomainUser ${var.admin_username}@${var.domain_name} -DomainPassword ${var.admin_password}"
+      "powershell.exe -ExecutionPolicy Bypass -File C:\\setup\\join-domain.ps1 -DomainName ${var.domain_name} -DomainUser Administrator@${var.domain_name} -DomainPassword ${var.admin_password}"
     ]
   }
 }
