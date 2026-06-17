@@ -2,81 +2,76 @@ terraform {
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = "0.95.0"
+      version = "~> 0.95"
     }
   }
+  required_version = ">= 1.3"
 }
 
 provider "proxmox" {
   endpoint  = var.proxmox_endpoint
-  username  = var.proxmox_username
   api_token = var.proxmox_api_token
-  insecure  = var.proxmox_insecure
+  insecure  = true
 
   ssh {
     agent    = false
-    username = var.proxmox_ssh_username
+    username = "root"
     password = var.proxmox_ssh_password
   }
 }
 
-# ============================================
-# DOMAIN CONTROLLER MODULE
-# ============================================
-
 module "domain_controller" {
   source = "./modules/domain-controller"
 
-  # VM Configuration
-  vm_name      = "AD01"
-  vm_id        = 8000
-  node_name    = "pve"
-  template_id  = 9100
-  datastore_id = "zfs-pool1"
+  node_name      = var.proxmox_node
+  datastore_id   = var.datastore
+  template_id    = var.dc_template_id
+  vm_id          = var.vm_id_base
+  network_bridge = var.network_bridge
 
-  # Credentials
-  admin_username = var.admin_username
-  admin_password = var.admin_password
-
-  # Domain Configuration
-  domain_name         = var.domain_name
-  domain_netbios_name = var.domain_netbios_name
-  safe_mode_password  = var.safe_mode_password
-
-  # Scripts path
-  scripts_path = "${path.root}/scripts"
+  admin_password     = var.admin_password
+  domain_name        = var.domain_name
+  domain_netbios     = var.domain_netbios
+  safe_mode_password = var.safe_mode_password
 }
-
-# ============================================
-# WINDOWS CLIENTS MODULE
-# ============================================
 
 module "windows_clients" {
   source = "./modules/windows-clients"
 
-  # Only create if DC is ready
   depends_on = [module.domain_controller]
 
-  # VM Configuration
-  node_name       = "pve"
-  template_id     = 9010
-  datastore_id    = "zfs-pool1"
-  client_count    = var.client_count
-  network_bridge  = "vmbr0"
+  node_name      = var.proxmox_node
+  datastore_id   = var.datastore
+  template_id    = var.win10_template_id
+  vm_id_base     = var.vm_id_base + 1
+  client_count   = var.client_count
+  network_bridge = var.network_bridge
 
-  # DC IP (dynamically discovered)
-  dc_ip = module.domain_controller.dc_ip
-
-  # Credentials
-  admin_username = var.admin_username
+  dc_ip          = module.domain_controller.dc_ip
   admin_password = var.admin_password
+  domain_name    = var.domain_name
+}
 
-  # Domain Configuration
-  domain_name = var.domain_name
+# ============================================
+# LAB PROFILE — swap via var.lab_profile
+# ============================================
 
-  # Scripts path
-  scripts_path = "${path.root}/scripts"
+module "profile_badblood" {
+  count  = var.lab_profile == "badblood" ? 1 : 0
+  source = "./modules/lab-profiles/bad-blood"
 
-  # Ensure DC is verified before creating clients
-  dc_verified = module.domain_controller.dc_verified
+  depends_on = [module.domain_controller]
+
+  dc_ip          = module.domain_controller.dc_ip
+  admin_password = var.admin_password
+}
+
+module "profile_vulnad" {
+  count  = var.lab_profile == "vulnad" ? 1 : 0
+  source = "./modules/lab-profiles/vuln-ad"
+
+  depends_on = [module.domain_controller]
+
+  dc_ip          = module.domain_controller.dc_ip
+  admin_password = var.admin_password
 }

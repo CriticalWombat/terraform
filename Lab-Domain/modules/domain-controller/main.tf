@@ -2,17 +2,13 @@ terraform {
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = "0.95.0"
+      version = "~> 0.95"
     }
   }
 }
 
-# ============================================
-# DOMAIN CONTROLLER VM
-# ============================================
-
 resource "proxmox_virtual_environment_vm" "dc" {
-  name      = var.vm_name
+  name      = "DC01"
   node_name = var.node_name
   vm_id     = var.vm_id
 
@@ -30,19 +26,19 @@ resource "proxmox_virtual_environment_vm" "dc" {
   }
 
   network_device {
-    bridge = "vmbr0"
+    bridge = var.network_bridge
     model  = "virtio"
   }
 
   disk {
     datastore_id = var.datastore_id
     interface    = "scsi0"
-    size         = 48
+    size         = 80
   }
 
   agent {
     enabled = true
-    timeout = "600s"
+    timeout = "1200s"
     wait_for_ip {
       ipv4 = true
     }
@@ -53,62 +49,24 @@ resource "proxmox_virtual_environment_vm" "dc" {
   }
 }
 
-# Wait for VM to boot and guest agent to report IP
-resource "time_sleep" "wait_for_boot" {
+locals {
+  dc_ip = [
+    for ip in flatten(proxmox_virtual_environment_vm.dc.ipv4_addresses) :
+    ip if !startswith(ip, "127.")
+  ][0]
+}
+
+# Minimum wait before Terraform attempts WinRM. Sysprep first-boot + setup.ps1
+# realistically needs 5-10 min. The connection timeout on promote_dc handles
+# anything slower by retrying the WinRM connection for up to 30 more minutes.
+resource "time_sleep" "wait_for_winrm" {
   depends_on      = [proxmox_virtual_environment_vm.dc]
   create_duration = "5m"
 }
 
-# Extract DHCP IP from guest agent
-locals {
-  dc_ip = proxmox_virtual_environment_vm.dc.ipv4_addresses[0][0]
-}
-
-# ============================================
-# DC PROMOTION
-# ============================================
-
-resource "null_resource" "upload_scripts" {
-  depends_on = [time_sleep.wait_for_boot]
-
-  triggers = {
-    vm_id       = proxmox_virtual_environment_vm.dc.id
-    script_hash = filemd5("${var.scripts_path}/promote-dc.ps1")
-    dc_ip       = local.dc_ip
-  }
-
-  connection {
-    type     = "winrm"
-    host     = local.dc_ip
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "10m"
-    use_ntlm = true
-  }
-
-provisioner "remote-exec" {
-  inline = [
-    "cmd /c echo Connected to DC at ${local.dc_ip}",
-    "cmd /c mkdir C:\\terraform-scripts 2>nul || echo Directory already exists"
-  ]
-}
-
-  provisioner "file" {
-    source      = "${var.scripts_path}/promote-dc.ps1"
-    destination = "C:\\terraform-scripts\\promote-dc.ps1"
-  }
-
-  provisioner "file" {
-    source      = "${var.scripts_path}/verify-dc.ps1"
-    destination = "C:\\terraform-scripts\\verify-dc.ps1"
-  }
-}
-
-resource "null_resource" "install_adds_role" {
-  depends_on = [null_resource.upload_scripts]
+# Install AD DS role + promote + reboot
+resource "null_resource" "promote_dc" {
+  depends_on = [time_sleep.wait_for_winrm]
 
   triggers = {
     vm_id = proxmox_virtual_environment_vm.dc.id
@@ -117,34 +75,7 @@ resource "null_resource" "install_adds_role" {
   connection {
     type     = "winrm"
     host     = local.dc_ip
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "15m"
-    use_ntlm = true
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "powershell.exe -ExecutionPolicy Bypass -Command \"if ((Get-WindowsFeature -Name AD-Domain-Services).InstallState -ne 'Installed') { Write-Host 'Installing AD DS Role...'; Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools; Write-Host 'AD DS Role installed successfully' } else { Write-Host 'AD DS Role already installed' }\""
-    ]
-  }
-}
-
-resource "null_resource" "promote_dc" {
-  depends_on = [null_resource.install_adds_role]
-
-  triggers = {
-    vm_id       = proxmox_virtual_environment_vm.dc.id
-    script_hash = filemd5("${var.scripts_path}/promote-dc.ps1")
-  }
-
-  connection {
-    type     = "winrm"
-    host     = local.dc_ip
-    user     = var.admin_username
+    user     = "Administrator"
     password = var.admin_password
     port     = 5986
     https    = true
@@ -154,40 +85,27 @@ resource "null_resource" "promote_dc" {
   }
 
   provisioner "remote-exec" {
-    inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\promote-dc.ps1 -DomainName ${var.domain_name} -NetBiosName ${var.domain_netbios_name} -SafeModePassword ${var.safe_mode_password}"
-    ]
-  }
-}
-
-resource "time_sleep" "wait_for_promotion" {
-  depends_on      = [null_resource.promote_dc]
-  create_duration = "5m"
-}
-
-resource "null_resource" "verify_dc" {
-  depends_on = [time_sleep.wait_for_promotion]
-
-  triggers = {
-    dc_promotion = null_resource.promote_dc.id
+    inline = ["cmd /c mkdir C:\\setup 2>nul || exit 0"]
   }
 
-
-  connection {
-    type     = "winrm"
-    host     = local.dc_ip
-    user     = var.admin_username
-    password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
-    timeout  = "10m"
-    use_ntlm = true
+  provisioner "file" {
+    source      = "${path.module}/scripts/promote-dc.ps1"
+    destination = "C:\\setup\\promote-dc.ps1"
   }
 
   provisioner "remote-exec" {
     inline = [
-      "powershell.exe -ExecutionPolicy Bypass -File C:\\terraform-scripts\\verify-dc.ps1"
+      "powershell.exe -ExecutionPolicy Bypass -File C:\\setup\\promote-dc.ps1 -DomainName ${var.domain_name} -NetBiosName ${var.domain_netbios} -SafeModePassword ${var.safe_mode_password}"
     ]
   }
+}
+
+# Wait for the post-promotion reboot to complete AND for AD services (ADWS,
+# DNS, Netlogon, KDC) to fully start. On slow storage this takes 8-12 min.
+# Profile modules and clients both depend_on this module, so they won't attempt
+# any DC connections until after this sleep. The profile scripts add their own
+# per-service readiness checks on top of this as a second layer.
+resource "time_sleep" "wait_for_reboot" {
+  depends_on      = [null_resource.promote_dc]
+  create_duration = "10m"
 }

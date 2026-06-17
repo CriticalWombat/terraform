@@ -1,203 +1,191 @@
 param(
-    [string]$UnattendPath   = "$PSScriptRoot\unattend.xml",
+    [Parameter(Mandatory=$true)]
+    [string]$Password,
+
     [string]$WinRMScriptPath = "$PSScriptRoot\setup.ps1",
-    [switch]$SkipSysprep
+
+    # Auto-detected from OS type if not specified
+    [string]$UnattendPath = "",
+
+    # Skip the "press Enter to continue" confirmation prompt
+    [switch]$Force,
+
+    # Validate files and guest agent, then exit without making changes
+    [switch]$Check
 )
 
 $ErrorActionPreference = "Stop"
-$VerbosePreference     = "Continue"
 
-function Write-Step {
-    param([string]$Message)
-    Write-Host "`n============================================================" -ForegroundColor Cyan
-    Write-Host "  $Message" -ForegroundColor Cyan
-    Write-Host "============================================================" -ForegroundColor Cyan
-}
-
+function Write-Step { param([string]$m) Write-Host "`n=== $m ===" -ForegroundColor Cyan }
 function Write-OK   { param([string]$m) Write-Host "  [OK]   $m" -ForegroundColor Green  }
-function Write-SKIP { param([string]$m) Write-Host "  [SKIP] $m" -ForegroundColor Yellow }
+function Write-WARN { param([string]$m) Write-Host "  [WARN] $m" -ForegroundColor Yellow }
 function Write-FAIL { param([string]$m) Write-Host "  [FAIL] $m" -ForegroundColor Red    }
 
-Write-Host "`n  Windows 10 Template Preparation Script" -ForegroundColor White
-Write-Host "  OS: $((Get-CimInstance Win32_OperatingSystem).Caption)" -ForegroundColor White
+$os = Get-CimInstance Win32_OperatingSystem
+Write-Host "`nPrepare-Template.ps1" -ForegroundColor White
+Write-Host "OS: $($os.Caption)" -ForegroundColor White
 
 
 # ============================================================
-# PRE-FLIGHT CHECKS
+# PRE-FLIGHT
 # ============================================================
-
 Write-Step "Pre-flight checks"
 
-# Confirm this is Windows 10 (not Server)
-$osCaption = (Get-CimInstance Win32_OperatingSystem).Caption
-if ($osCaption -notmatch "Windows 10") {
-    Write-Warning "This script targets Windows 10. Detected: $osCaption. Continuing anyway..."
-}
-
-# Confirm running as Administrator
-$currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
-$principal   = New-Object Security.Principal.WindowsPrincipal($currentUser)
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-FAIL "Script must be run as Administrator"
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-FAIL "Must be run as Administrator"
     exit 1
 }
 Write-OK "Running as Administrator"
 
-if (-not $SkipSysprep) {
-    # Confirm unattend exists before doing anything destructive
-    if (-not (Test-Path $UnattendPath)) {
-        Write-FAIL "unattend.xml not found at: $UnattendPath"
-        Write-Host "  Place your unattend.xml next to this script or pass -UnattendPath" -ForegroundColor Red
-        exit 1
-    }
-    Write-OK "unattend.xml found at: $UnattendPath"
+# Password complexity: 8+ chars, 3 of 4 character classes
+$hasUpper   = $Password -cmatch '[A-Z]'
+$hasLower   = $Password -cmatch '[a-z]'
+$hasDigit   = $Password -match '\d'
+$hasSpecial = $Password -match '[^A-Za-z0-9]'
+$complexity = ($hasUpper,$hasLower,$hasDigit,$hasSpecial | Where-Object { $_ }).Count
+if ($Password.Length -lt 8 -or $complexity -lt 3) {
+    Write-FAIL "Password does not meet Windows complexity requirements (8+ chars, 3 of: uppercase, lowercase, digit, special)"
+    exit 1
+}
+Write-OK "Password meets complexity requirements"
 
-    # Confirm setup.ps1 exists - it must be staged into the image
-    if (-not (Test-Path $WinRMScriptPath)) {
-        Write-FAIL "setup.ps1 not found at: $WinRMScriptPath"
-        Write-Host "  Place setup.ps1 next to this script or pass -WinRMScriptPath" -ForegroundColor Red
-        exit 1
+# Auto-detect unattend if not specified
+if ($UnattendPath -eq "") {
+    $isServer   = $os.Caption -match "Server"
+    $UnattendPath = if ($isServer) {
+        "$PSScriptRoot\unattend-server.xml"
+    } else {
+        "$PSScriptRoot\unattend-win10.xml"
     }
-    Write-OK "setup.ps1 found at: $WinRMScriptPath"
+    Write-OK "Detected OS type: $(if ($isServer) { 'Windows Server' } else { 'Windows 10' })"
 }
 
-if ($SkipSysprep) {
-    Write-Host "`n  -SkipSysprep specified. Stopping here." -ForegroundColor Cyan
-    Write-Host "  Re-run without -SkipSysprep when ready to proceed." -ForegroundColor Cyan
+if (-not (Test-Path $UnattendPath)) {
+    Write-FAIL "Unattend file not found: $UnattendPath"
+    exit 1
+}
+Write-OK "Unattend: $UnattendPath"
+
+if (-not (Test-Path $WinRMScriptPath)) {
+    Write-FAIL "setup.ps1 not found: $WinRMScriptPath"
+    exit 1
+}
+Write-OK "setup.ps1: $WinRMScriptPath"
+
+# Proxmox guest agent check — critical for Terraform IP discovery
+$ga = Get-Service "QEMU-GA" -ErrorAction SilentlyContinue
+if ($ga) {
+    Write-OK "Proxmox guest agent (QEMU-GA) is installed"
+} else {
+    Write-WARN "Proxmox guest agent NOT found — Terraform cannot discover the VM IP without it."
+    Write-WARN "Install qemu-ga-x86_64.msi from the VirtIO ISO before templating."
+    Write-WARN "Continuing anyway — install it before converting to template."
+}
+
+# VirtIO NIC check (proxy for VirtIO drivers being installed)
+$virtioNic = Get-NetAdapter | Where-Object { $_.InterfaceDescription -match "VirtIO|Red Hat" }
+if ($virtioNic) {
+    Write-OK "VirtIO network adapter detected"
+} else {
+    Write-WARN "No VirtIO NIC found. Install VirtIO drivers from the VirtIO ISO for best performance."
+}
+
+if ($Check) {
+    Write-Host "`n-Check complete. Re-run without -Check to proceed with cleanup and sysprep." -ForegroundColor Cyan
     exit 0
 }
 
-Read-Host "`n  Press Enter to continue with cleanup and sysprep (Ctrl+C to abort)"
+
+# ============================================================
+# CONFIRMATION
+# ============================================================
+Write-Host "`n  This will clean the VM and run sysprep. The VM will shut down." -ForegroundColor Yellow
+Write-Host "  Password '$Password' will be embedded into the template." -ForegroundColor Yellow
+Write-Host "  Use this same value for admin_password in terraform.tfvars.`n" -ForegroundColor Yellow
+
+if (-not $Force) {
+    Read-Host "  Press Enter to continue (Ctrl+C to abort)"
+}
 
 
 # ============================================================
 # STEP 1: PRE-SYSPREP CLEANUP
 # ============================================================
-
 Write-Step "Step 1: Pre-sysprep cleanup"
 
 $ErrorActionPreference = "SilentlyContinue"
 
-# 1a. Reset sysprep generalization count
-#     Windows blocks sysprep after 3 runs - this resets the counter
-Write-Verbose "Resetting sysprep state..."
+# Reset sysprep generalization counter (allows re-sysprep)
 $sysprepKey = "HKLM:\SYSTEM\Setup\Status\SysprepStatus"
-$setupKey   = "HKLM:\SYSTEM\Setup"
 if (Test-Path $sysprepKey) {
-    Set-ItemProperty -Path $sysprepKey -Name "GeneralizationState"      -Value 7 -Force
-    Set-ItemProperty -Path $sysprepKey -Name "CleanupState"             -Value 2 -Force
-    Set-ItemProperty -Path $setupKey   -Name "SetupType"                -Value 4 -Force
-    Set-ItemProperty -Path $setupKey   -Name "SystemSetupInProgress"    -Value 1 -Force
+    Set-ItemProperty -Path $sysprepKey -Name "GeneralizationState"   -Value 7 -Force
+    Set-ItemProperty -Path $sysprepKey -Name "CleanupState"          -Value 2 -Force
+    Set-ItemProperty -Path "HKLM:\SYSTEM\Setup" -Name "SetupType"               -Value 4 -Force
+    Set-ItemProperty -Path "HKLM:\SYSTEM\Setup" -Name "SystemSetupInProgress"   -Value 1 -Force
 }
-Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform" `
-    -Name "SkipRearm" -Value 1 -Force
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform" -Name "SkipRearm" -Value 1 -Force
 Write-OK "Sysprep state reset"
 
-# 1b. Rearm Windows activation
-Write-Verbose "Rearming activation..."
 & cscript //nologo C:\Windows\System32\slmgr.vbs /rearm
 Write-OK "Activation rearmed"
 
-# 1c. Clear Panther cache - Windows caches the unattend here and uses
-Write-Verbose "Clearing Panther cache..."
-@(
-    "C:\Windows\Panther",
-    "C:\Windows\System32\Sysprep\Panther"
-) | ForEach-Object {
-    if (Test-Path $_) {
-        Remove-Item "$_\*" -Recurse -Force
-        Write-Verbose "  Cleared: $_"
-    }
+# Clear Panther cache and stale unattend copies
+@("C:\Windows\Panther", "C:\Windows\System32\Sysprep\Panther") | ForEach-Object {
+    if (Test-Path $_) { Remove-Item "$_\*" -Recurse -Force }
 }
-
-# Remove any stale unattend copies from locations Windows searches
-@(
-    "C:\Windows\Panther\unattend.xml",
-    "C:\Windows\unattend.xml",
-    "C:\unattend.xml"
-) | ForEach-Object {
+@("C:\Windows\Panther\unattend.xml", "C:\Windows\unattend.xml", "C:\unattend.xml") | ForEach-Object {
     if (Test-Path $_) { Remove-Item $_ -Force }
 }
-Write-OK "Panther cache cleared (all subdirectories and files)"
+Write-OK "Panther cache cleared"
 
-# 1d. Clear Windows Update cache
-Write-Verbose "Clearing Windows Update cache..."
+# Windows Update cache
 Stop-Service wuauserv, bits -Force
-@(
-    "C:\Windows\SoftwareDistribution\Download",
-    "C:\Windows\SoftwareDistribution\DeliveryOptimization"
-) | ForEach-Object {
+@("C:\Windows\SoftwareDistribution\Download", "C:\Windows\SoftwareDistribution\DeliveryOptimization") | ForEach-Object {
     if (Test-Path $_) { Remove-Item "$_\*" -Recurse -Force }
 }
 Start-Service wuauserv, bits
 Write-OK "Windows Update cache cleared"
 
-# 1e. Clear temp files
-Write-Verbose "Clearing temp files..."
+# Temp files
 @($env:TEMP, $env:TMP, "C:\Windows\Temp", "C:\Windows\Prefetch") | ForEach-Object {
     if (Test-Path $_) { Remove-Item "$_\*" -Recurse -Force }
 }
 Write-OK "Temp files cleared"
 
-# 1f. Remove non-default user profiles
-Write-Verbose "Removing non-default user profiles..."
+# Non-default user profiles
 Get-CimInstance Win32_UserProfile |
-    Where-Object {
-        -not $_.Special -and
-        $_.LocalPath -notmatch "Administrator|Default|Public|cloudbase-init|systemprofile|NetworkService|LocalService"
-    } | ForEach-Object {
-        try {
-            Remove-CimInstance -InputObject $_
-            Write-OK "Removed profile: $($_.LocalPath)"
-        } catch {
-            Write-SKIP "Could not remove profile: $($_.LocalPath)"
-        }
+    Where-Object { -not $_.Special -and $_.LocalPath -notmatch "Administrator|Default|Public|cloudbase-init|systemprofile|NetworkService|LocalService" } |
+    ForEach-Object {
+        try { Remove-CimInstance -InputObject $_; Write-OK "Removed profile: $($_.LocalPath)" }
+        catch { Write-WARN "Could not remove profile: $($_.LocalPath)" }
     }
 
-# 1g. Clear event logs
-Write-Verbose "Clearing event logs..."
+# Event logs
 Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
     Where-Object { $_.RecordCount -gt 0 } | ForEach-Object {
-        try {
-            [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession.ClearLog($_.LogName)
-        } catch { }
+        try { [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession.ClearLog($_.LogName) } catch { }
     }
 Write-OK "Event logs cleared"
-Write-Verbose "Wiping WinRM listeners and cert store..."
 
-Get-ChildItem WSMan:\Localhost\Listener -ErrorAction SilentlyContinue |
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
+# WinRM listeners and certs (setup.ps1 re-creates them per-clone with the correct hostname)
+Get-ChildItem WSMan:\Localhost\Listener -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("My", "LocalMachine")
 $store.Open("ReadWrite")
-@($store.Certificates) | ForEach-Object {
-    try {
-        $store.Remove($_)
-        Write-Verbose "  [OK] Removed cert: $($_.Subject) ($($_.Thumbprint))"
-    } catch {
-        Write-Verbose "  [SKIP] Could not remove cert: $($_.Thumbprint)"
-    }
-}
+@($store.Certificates) | ForEach-Object { try { $store.Remove($_) } catch { } }
 $store.Close()
-Write-OK "WinRM listeners and all LocalMachine\My certs wiped"
+Write-OK "WinRM listeners and certs cleared"
 
-# 1i. Clear NIC history to prevent ghost adapters in clones
-Write-Verbose "Clearing NIC history..."
+# NIC history (prevents ghost adapters in clones)
 $netKey = "HKLM:\SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}"
 if (Test-Path $netKey) {
-    Get-ChildItem $netKey |
-        Where-Object { $_.PSChildName -ne "Descriptions" } |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem $netKey | Where-Object { $_.PSChildName -ne "Descriptions" } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 ipconfig /flushdns | Out-Null
 Write-OK "NIC history and DNS cache cleared"
 
-# 1k. Disk cleanup
-Write-Verbose "Running disk cleanup..."
+# Disk cleanup
 $cleanupKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches"
-Get-ChildItem $cleanupKey | ForEach-Object {
-    Set-ItemProperty -Path $_.PSPath -Name "StateFlags0001" -Value 2 -Type DWORD -Force
-}
+Get-ChildItem $cleanupKey | ForEach-Object { Set-ItemProperty -Path $_.PSPath -Name "StateFlags0001" -Value 2 -Type DWORD -Force }
 Start-Process cleanmgr.exe -ArgumentList "/sagerun:1" -Wait -NoNewWindow
 Write-OK "Disk cleanup complete"
 
@@ -205,46 +193,38 @@ $ErrorActionPreference = "Stop"
 
 
 # ============================================================
-# STEP 2: STAGE setup.ps1 INTO THE IMAGE
-#
-# FirstLogonCommands in unattend.xml calls this script by path
-# on each clone's first boot. It must exist in the image before
-# sysprep runs - we copy it here rather than relying on the
-# unattend to write it, keeping the unattend simple and avoiding
-# any inline script quoting issues.
+# STEP 2: INJECT PASSWORD INTO UNATTEND AND STAGE setup.ps1
 # ============================================================
+Write-Step "Step 2: Staging files"
 
-Write-Step "Step 2: Staging setup.ps1"
+# Inject the provided password in place of the TEMPLATE_PASSWORD placeholder
+$unattendContent = Get-Content $UnattendPath -Raw
+if ($unattendContent -notmatch 'TEMPLATE_PASSWORD') {
+    Write-FAIL "Unattend file does not contain the TEMPLATE_PASSWORD placeholder. Aborting."
+    exit 1
+}
+$unattendContent = $unattendContent -replace 'TEMPLATE_PASSWORD', $Password
+
+$sysprepDir     = "C:\Windows\System32\Sysprep"
+$sysprepUnattend = "$sysprepDir\unattend.xml"
+Set-Content -Path $sysprepUnattend -Value $unattendContent -Encoding UTF8
+Write-OK "Unattend written to $sysprepUnattend (password injected)"
 
 $scriptDest = "C:\Windows\Setup\Scripts"
-if (-not (Test-Path $scriptDest)) {
-    New-Item -ItemType Directory -Path $scriptDest -Force | Out-Null
-}
-
+if (-not (Test-Path $scriptDest)) { New-Item -ItemType Directory -Path $scriptDest -Force | Out-Null }
 Copy-Item $WinRMScriptPath "$scriptDest\setup.ps1" -Force
 Write-OK "setup.ps1 staged to $scriptDest\setup.ps1"
 
 
 # ============================================================
-# STEP 3: PLACE UNATTEND AND RUN SYSPREP
+# STEP 3: SYSPREP
 # ============================================================
-
 Write-Step "Step 3: Sysprep"
 
-$sysprepUnattend = "C:\Windows\System32\Sysprep\unattend.xml"
-
-Write-Verbose "Copying unattend.xml to Sysprep folder..."
-Copy-Item $UnattendPath $sysprepUnattend -Force
-Write-OK "unattend.xml placed at $sysprepUnattend"
-
-Write-Host "`n  Launching sysprep. The VM will shut down when complete." -ForegroundColor Yellow
-Write-Host "  After shutdown: convert to template in Proxmox." -ForegroundColor Yellow
-Write-Host "  DO NOT boot the VM again before templating.`n" -ForegroundColor Red
+Write-Host "  Launching sysprep. The VM will shut down when complete." -ForegroundColor Yellow
+Write-Host "  After shutdown: RIGHT-CLICK the VM in Proxmox -> Convert to Template." -ForegroundColor Yellow
+Write-Host "  Do NOT boot the VM again before converting.`n" -ForegroundColor Red
 
 Start-Sleep -Seconds 3
 
-& C:\Windows\System32\Sysprep\sysprep.exe `
-    /generalize `
-    /oobe `
-    /shutdown `
-    /unattend:$sysprepUnattend
+& C:\Windows\System32\Sysprep\sysprep.exe /generalize /oobe /shutdown /unattend:$sysprepUnattend
