@@ -77,9 +77,8 @@ resource "null_resource" "promote_dc" {
     host     = local.dc_ip
     user     = "Administrator"
     password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
+    port     = 5985
+    https    = false
     timeout  = "30m"
     use_ntlm = true
   }

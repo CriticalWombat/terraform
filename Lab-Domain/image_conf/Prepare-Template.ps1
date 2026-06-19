@@ -4,6 +4,8 @@ param(
 
     [string]$WinRMScriptPath = "$PSScriptRoot\setup.ps1",
 
+    [string]$SetupCompletePath = "$PSScriptRoot\SetupComplete.cmd",
+
     # Auto-detected from OS type if not specified
     [string]$UnattendPath = "",
 
@@ -71,6 +73,12 @@ if (-not (Test-Path $WinRMScriptPath)) {
     exit 1
 }
 Write-OK "setup.ps1: $WinRMScriptPath"
+
+if (-not (Test-Path $SetupCompletePath)) {
+    Write-FAIL "SetupComplete.cmd not found: $SetupCompletePath"
+    exit 1
+}
+Write-OK "SetupComplete.cmd: $SetupCompletePath"
 
 # Proxmox guest agent check — critical for Terraform IP discovery
 $ga = Get-Service "QEMU-GA" -ErrorAction SilentlyContinue
@@ -216,7 +224,7 @@ $ErrorActionPreference = "Stop"
 
 
 # ============================================================
-# STEP 2: INJECT PASSWORD INTO UNATTEND AND STAGE setup.ps1
+# STEP 2: INJECT PASSWORD INTO UNATTEND AND STAGE SCRIPTS
 # ============================================================
 Write-Step "Step 2: Staging files"
 
@@ -237,6 +245,8 @@ $scriptDest = "C:\Windows\Setup\Scripts"
 if (-not (Test-Path $scriptDest)) { New-Item -ItemType Directory -Path $scriptDest -Force | Out-Null }
 Copy-Item $WinRMScriptPath "$scriptDest\setup.ps1" -Force
 Write-OK "setup.ps1 staged to $scriptDest\setup.ps1"
+Copy-Item $SetupCompletePath "$scriptDest\SetupComplete.cmd" -Force
+Write-OK "SetupComplete.cmd staged to $scriptDest\SetupComplete.cmd"
 
 
 # ============================================================

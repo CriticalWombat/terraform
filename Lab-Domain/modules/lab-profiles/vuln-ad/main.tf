@@ -8,9 +8,8 @@ resource "null_resource" "run_vulnad" {
     host     = var.dc_ip
     user     = "Administrator"
     password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
+    port     = 5985
+    https    = false
     timeout  = "60m"
     use_ntlm = true
   }

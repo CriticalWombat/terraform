@@ -10,13 +10,13 @@ variable "proxmox_endpoint" {
 variable "proxmox_api_token" {
   description = "Proxmox API token (e.g. root@pam!terraform=<uuid>)"
   type        = string
-  sensitive   = true
+  sensitive   = false # Change this if you want to restrict passwords on the cli output
 }
 
 variable "proxmox_ssh_password" {
   description = "Proxmox root SSH password (used by the provider for file operations)"
   type        = string
-  sensitive   = true
+  sensitive   = false # Change this if you want to restrict passwords on the cli output
 }
 
 variable "proxmox_node" {
@@ -68,7 +68,7 @@ variable "vm_id_base" {
 variable "admin_password" {
   description = "Local Administrator password set in the VM templates"
   type        = string
-  sensitive   = true
+  sensitive   = false # Change this if you want to restrict passwords on the cli output
 }
 
 # ============================================
@@ -90,7 +90,7 @@ variable "domain_netbios" {
 variable "safe_mode_password" {
   description = "DSRM (Directory Services Restore Mode) password for the DC"
   type        = string
-  sensitive   = true
+  sensitive   = false # Change this if you want to restrict passwords on the cli output
 }
 
 variable "client_count" {
