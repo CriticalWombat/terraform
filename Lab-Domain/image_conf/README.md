@@ -154,11 +154,12 @@ terraform apply
 
 When Terraform clones a template and starts it:
 
-1. Windows processes the staged `unattend.xml`, which:
+1. Windows processes the staged `unattend.xml` specialize pass, which:
    - Assigns a unique random hostname
-   - Sets the Administrator password
+   - Enables the built-in Administrator account (Win10 only)
+   - Runs `setup.ps1` synchronously via `RunSynchronous` in SYSTEM context — no logon required
 
-2. Windows Setup automatically executes `C:\Windows\Setup\Scripts\SetupComplete.cmd`, which calls `setup.ps1` in SYSTEM context — no user logon required.
+2. The `oobeSystem` pass then sets the Administrator password and configures AutoLogon.
 
 3. `setup.ps1` configures:
    - Proxmox guest agent (starts/enables it)
