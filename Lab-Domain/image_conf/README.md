@@ -87,6 +87,10 @@ After Windows boots for the first time, open Device Manager or PowerShell and in
 
 > Verify with: `Get-Service QEMU-GA` — it should show `Running`.
 
+4. **Run Windows Update to completion before proceeding.**
+
+   Open Settings → Windows Update and install all available updates. Reboot as many times as needed until no further updates are offered. Sysprep's generalize pass fails with `hr = 0x800f0975` if a pending update or servicing operation is holding reserved storage — fully updating beforehand is the most reliable way to avoid this.
+
 ---
 
 ## Step 4 — Run Prepare-Template.ps1
@@ -174,6 +178,9 @@ The guest agent is not running. RDP into the VM and run `Get-Service QEMU-GA`. I
 
 **WinRM connection refused / timeout**  
 Check `C:\Windows\Temp\setup.log` on the clone. If the file is empty or missing, the unattend didn't run `setup.ps1` — the template may have been booted after sysprep. Rebuild from the ISO.
+
+**Sysprep fails with `hr = 0x800f0975` (reserved storage in use)**  
+A Windows Update or servicing operation is holding reserved storage. Run Windows Update to completion (rebooting until no updates remain), then re-run `Prepare-Template.ps1`. The script also runs `DISM /Set-ReservedStorageState /State:Disabled` automatically, but this cannot override an actively running update.
 
 **Sysprep fails with "A fatal error occurred"**  
 Usually caused by an installed Microsoft Store app incompatible with sysprep. Run `Get-AppxPackage | Remove-AppxPackage` on the source VM before running `Prepare-Template.ps1`.
