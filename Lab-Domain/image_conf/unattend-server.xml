@@ -57,34 +57,7 @@
                 <SkipUserOOBE>true</SkipUserOOBE>
             </OOBE>
 
-            <FirstLogonCommands>
-                <SynchronousCommand wcm:action="add">
-                    <Order>1</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0"</CommandLine>
-                    <Description>Enable RDP</Description>
-                </SynchronousCommand>
-                <SynchronousCommand wcm:action="add">
-                    <Order>2</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'"</CommandLine>
-                    <Description>Open RDP firewall rule</Description>
-                </SynchronousCommand>
-                <!-- Disable Server Manager auto-open -->
-                <SynchronousCommand wcm:action="add">
-                    <Order>3</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -Command "New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\ServerManager' -Name 'DoNotOpenServerManagerAtLogon' -Value 1 -PropertyType DWORD -Force"</CommandLine>
-                    <Description>Disable Server Manager at logon</Description>
-                </SynchronousCommand>
-                <!--
-                    setup.ps1 was staged to C:\Windows\Setup\Scripts\ by Prepare-Template.ps1.
-                    It runs here with $env:COMPUTERNAME already set to this clone's unique
-                    hostname so the WinRM cert has the correct CN.
-                -->
-                <SynchronousCommand wcm:action="add">
-                    <Order>4</Order>
-                    <CommandLine>powershell -ExecutionPolicy Bypass -File "C:\Windows\Setup\Scripts\setup.ps1"</CommandLine>
-                    <Description>Configure WinRM, guest agent, lab defaults</Description>
-                </SynchronousCommand>
-            </FirstLogonCommands>
+
         </component>
 
         <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64"

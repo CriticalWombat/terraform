@@ -94,9 +94,8 @@ resource "null_resource" "configure_and_join" {
     host     = local.client_ips[each.key]
     user     = "Administrator"
     password = var.admin_password
-    port     = 5986
-    https    = true
-    insecure = true
+    port     = 5985
+    https    = false
     timeout  = "30m"
     use_ntlm = true
   }

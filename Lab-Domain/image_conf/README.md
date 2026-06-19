@@ -15,7 +15,8 @@ Both templates are identical in what they need (WinRM, guest agent, VirtIO). The
 | File | Purpose |
 |---|---|
 | `Prepare-Template.ps1` | Run once on the source VM to clean and sysprep it |
-| `setup.ps1` | Runs automatically on first boot of every clone; configures WinRM, Defender, RDP, guest agent |
+| `setup.ps1` | Runs automatically on first boot of every clone; configures WinRM, RDP, guest agent |
+| `SetupComplete.cmd` | Calls `setup.ps1` via the Windows Setup `SetupComplete` hook — more reliable than `FirstLogonCommands` |
 | `unattend-server.xml` | Drives Windows OOBE for the Server template |
 | `unattend-win10.xml` | Drives Windows OOBE for the Windows 10 template |
 
@@ -117,7 +118,7 @@ The script will:
 1. Check prerequisites (admin, guest agent, VirtIO)
 2. Clean temp files, event logs, WU cache, NIC history, WinRM certs
 3. Inject your password into the correct unattend file (auto-detected from OS type)
-4. Stage `setup.ps1` into `C:\Windows\Setup\Scripts\`
+4. Stage `setup.ps1` and `SetupComplete.cmd` into `C:\Windows\Setup\Scripts\`
 5. Run `sysprep /generalize /oobe /shutdown`
 
 The VM shuts down automatically when sysprep finishes.
@@ -156,18 +157,18 @@ When Terraform clones a template and starts it:
 1. Windows processes the staged `unattend.xml`, which:
    - Assigns a unique random hostname
    - Sets the Administrator password
-   - Enables RDP
-   - Runs `setup.ps1`
 
-2. `setup.ps1` configures:
+2. Windows Setup automatically executes `C:\Windows\Setup\Scripts\SetupComplete.cmd`, which calls `setup.ps1` in SYSTEM context — no user logon required.
+
+3. `setup.ps1` configures:
    - Proxmox guest agent (starts/enables it)
+   - RDP enabled + firewall rule opened
    - WinRM HTTPS on port 5986 with a self-signed cert for the new hostname
-   - Defender real-time protection **disabled** (required for pentesting tools)
    - Windows Update auto-restart **disabled** (prevents mid-session reboots)
-   - NLA for RDP **disabled** (allows RDP without domain pre-auth)
-   - High-performance power plan (prevents VM sleep)
+   - High-performance power plan, sleep disabled
+   - Server Manager auto-open **disabled** (Server SKUs only)
 
-3. The guest agent reports the VM's IP to Proxmox, which Terraform reads to proceed with WinRM connections.
+4. The guest agent reports the VM's IP to Proxmox, which Terraform reads to proceed with WinRM connections.
 
 ---
 
@@ -187,6 +188,3 @@ Usually caused by an installed Microsoft Store app incompatible with sysprep. Ru
 
 **Password doesn't work after clone**  
 The password in the unattend did not match what you provided. Re-run `Prepare-Template.ps1 -Password "..."` with the correct password and re-template. Ensure the same value is in `admin_password` in `terraform.tfvars`.
-
-**BadBlood / VulnAD fails with Defender errors**  
-If you're seeing AV alerts during lab setup, the Defender disable in `setup.ps1` may not have run. Verify in the log, or manually run `Set-MpPreference -DisableRealtimeMonitoring $true` on the DC after cloning.
