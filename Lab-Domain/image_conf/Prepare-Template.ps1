@@ -152,9 +152,10 @@ Write-OK "Windows Update cache cleared"
 }
 Write-OK "Temp files cleared"
 
-# Non-default user profiles
+# Non-default user profiles (never remove the currently active profile)
+$currentSID = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 Get-CimInstance Win32_UserProfile |
-    Where-Object { -not $_.Special -and $_.LocalPath -notmatch "Administrator|Default|Public|cloudbase-init|systemprofile|NetworkService|LocalService" } |
+    Where-Object { -not $_.Special -and $_.SID -ne $currentSID -and $_.LocalPath -notmatch "Administrator|Default|Public|cloudbase-init|systemprofile|NetworkService|LocalService" } |
     ForEach-Object {
         try { Remove-CimInstance -InputObject $_; Write-OK "Removed profile: $($_.LocalPath)" }
         catch { Write-WARN "Could not remove profile: $($_.LocalPath)" }
@@ -168,6 +169,19 @@ Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
 Write-OK "Event logs cleared"
 
 # WinRM listeners and certs (setup.ps1 re-creates them per-clone with the correct hostname)
+# WSMan:\Localhost\Listener requires the service to be up to enumerate correctly
+Set-Service WinRM -StartupType Manual -ErrorAction SilentlyContinue
+Start-Service WinRM -ErrorAction SilentlyContinue
+$winrmSvc = Get-Service WinRM -ErrorAction SilentlyContinue
+if ($winrmSvc.Status -ne 'Running') {
+    Start-Sleep -Seconds 10
+    $winrmSvc.Refresh()
+}
+if ($winrmSvc.Status -eq 'Running') {
+    Write-OK "WinRM service is running"
+} else {
+    Write-WARN "WinRM service could not be started - listener removal may be incomplete"
+}
 Get-ChildItem WSMan:\Localhost\Listener -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("My", "LocalMachine")
 $store.Open("ReadWrite")
