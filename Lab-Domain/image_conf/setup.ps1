@@ -1,4 +1,4 @@
-# setup.ps1 — runs once on first boot of every clone via unattend.xml FirstLogonCommands.
+# setup.ps1 — runs once on first boot of every clone via SetupComplete.cmd (SYSTEM context).
 # Shared by both the Windows Server (DC) and Windows 10 (client) templates.
 
 $logFile = "C:\Windows\Temp\setup.log"
@@ -40,19 +40,7 @@ if ($ga) {
 }
 
 # ----------------------------------------------------------
-# 3. Disable Windows Defender real-time protection
-#    Pentesting tools (Mimikatz, BadBlood payloads, etc.) will
-#    be blocked or deleted by Defender otherwise.
-# ----------------------------------------------------------
-try {
-    Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
-    Write-Log "Defender real-time protection disabled"
-} catch {
-    Write-Log "Could not disable Defender (may not be present on Server): $_" "WARN"
-}
-
-# ----------------------------------------------------------
-# 4. Disable Windows Update automatic restart
+# 3. Disable Windows Update automatic restart
 #    Prevents unexpected reboots mid-lab-session.
 # ----------------------------------------------------------
 $auKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
@@ -62,26 +50,28 @@ Set-ItemProperty -Path $auKey -Name "AUOptions"                     -Value 1 -Ty
 Write-Log "Windows Update auto-restart disabled"
 
 # ----------------------------------------------------------
-# 5. Disable NLA for RDP
-#    Allows RDP connections without pre-authentication,
-#    needed before domain join and for most pentest tooling.
-# ----------------------------------------------------------
-$tsKey = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
-Set-ItemProperty -Path $tsKey -Name "UserAuthentication" -Value 0 -Type DWORD -Force
-Write-Log "NLA for RDP disabled"
-
-# ----------------------------------------------------------
-# 6. High-performance power plan + disable sleep/screensaver
+# 4. High-performance power plan + disable sleep/screensaver
 #    Prevents VMs from going idle during long pentesting runs.
 # ----------------------------------------------------------
 powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null   # High performance GUID
 powercfg /change standby-timeout-ac 0
 powercfg /change hibernate-timeout-ac 0
-Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "ScreenSaveActive" -Value "0" -ErrorAction SilentlyContinue
 Write-Log "Power plan set to High Performance, sleep disabled"
 
 # ----------------------------------------------------------
-# 7. WinRM service
+# 5. Enable RDP + disable Server Manager auto-open (Server SKUs only)
+# ----------------------------------------------------------
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Type DWORD -Force
+Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue
+Write-Log "RDP enabled"
+
+if ((Get-CimInstance Win32_OperatingSystem).Caption -match 'Server') {
+    New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\ServerManager' -Name 'DoNotOpenServerManagerAtLogon' -Value 1 -PropertyType DWORD -Force | Out-Null
+    Write-Log "Server Manager auto-open disabled"
+}
+
+# ----------------------------------------------------------
+# 6. WinRM service
 # ----------------------------------------------------------
 Set-Service WinRM -StartupType Automatic
 Start-Service WinRM -ErrorAction SilentlyContinue
@@ -104,38 +94,19 @@ Set-Item WSMan:\localhost\Client\TrustedHosts       -Value '*' -Force
 Write-Log "WSMan auth settings configured"
 
 # ----------------------------------------------------------
-# 8. Self-signed cert bound to this clone's hostname + HTTPS listener
+# 7. Firewall rule for WinRM HTTP
 # ----------------------------------------------------------
-Get-ChildItem WSMan:\Localhost\Listener | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
-$cert = New-SelfSignedCertificate `
-    -DnsName $env:COMPUTERNAME `
-    -CertStoreLocation Cert:\LocalMachine\My `
-    -NotAfter (Get-Date).AddYears(5)
-
-New-Item `
-    -Path WSMan:\Localhost\Listener `
-    -Transport HTTPS `
-    -Address * `
-    -CertificateThumbPrint $cert.Thumbprint `
-    -Force | Out-Null
-Write-Log "WinRM HTTPS listener created (thumbprint: $($cert.Thumbprint))"
-
-# ----------------------------------------------------------
-# 9. Firewall rules for WinRM (both HTTP and HTTPS, all profiles)
-# ----------------------------------------------------------
-@("WinRM-HTTP", "WinRM-HTTPS", "Windows Remote Management (HTTP-In)", "Windows Remote Management (HTTPS-In)") |
+@("WinRM-HTTP", "Windows Remote Management (HTTP-In)") |
     ForEach-Object {
         Remove-NetFirewallRule -Name        $_ -ErrorAction SilentlyContinue
         Remove-NetFirewallRule -DisplayName $_ -ErrorAction SilentlyContinue
     }
 
-New-NetFirewallRule -Name "WinRM-HTTP"  -DisplayName "WinRM HTTP"  -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 5985 -Profile Any | Out-Null
-New-NetFirewallRule -Name "WinRM-HTTPS" -DisplayName "WinRM HTTPS" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 5986 -Profile Any | Out-Null
-Write-Log "WinRM firewall rules created"
+New-NetFirewallRule -Name "WinRM-HTTP" -DisplayName "WinRM HTTP" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 5985 -Profile Any | Out-Null
+Write-Log "WinRM firewall rule created (port 5985)"
 
 # ----------------------------------------------------------
-# 10. Restart WinRM to apply all changes
+# 8. Restart WinRM to apply all changes
 # ----------------------------------------------------------
 Restart-Service WinRM
-Write-Log "=== Setup complete — WinRM HTTPS ready on port 5986 ==="
+Write-Log "=== Setup complete — WinRM HTTP ready on port 5985 ==="
