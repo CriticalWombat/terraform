@@ -146,6 +146,15 @@ Stop-Service wuauserv, bits -Force
 Start-Service wuauserv, bits
 Write-OK "Windows Update cache cleared"
 
+# Disable reserved storage — sysprep /generalize fails with hr=0x800f0975 when
+# this feature (Win10 1903+) is in use. Benign non-zero exit on Server SKUs.
+$dismOut = & dism.exe /Online /Set-ReservedStorageState /State:Disabled 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-OK "Reserved storage disabled"
+} else {
+    Write-WARN "Reserved storage (benign on Server SKUs): $($dismOut | Select-Object -Last 2 | Out-String -NoNewline)"
+}
+
 # Temp files
 @($env:TEMP, $env:TMP, "C:\Windows\Temp", "C:\Windows\Prefetch") | ForEach-Object {
     if (Test-Path $_) { Remove-Item "$_\*" -Recurse -Force }
