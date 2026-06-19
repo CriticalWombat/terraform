@@ -91,7 +91,13 @@ After Windows boots for the first time, open Device Manager or PowerShell and in
 
 ## Step 4 — Run Prepare-Template.ps1
 
-Copy the `image_conf` folder to the VM (drag-drop via RDP, or map a shared folder), then open PowerShell as Administrator:
+Copy the `image_conf` folder to the VM (drag-drop via RDP, or map a shared folder), then open PowerShell as Administrator and allow script execution:
+
+```powershell
+Set-ExecutionPolicy -Scope LocalMachine -ExecutionPolicy Bypass -Force
+```
+
+Then run the preparation script:
 
 ```powershell
 # Validate everything looks good first (no changes made)
