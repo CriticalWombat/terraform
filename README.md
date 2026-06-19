@@ -7,7 +7,7 @@ Provisions a Windows Active Directory lab on Proxmox. Clones pre-built templates
 ## Prerequisites
 
 - Proxmox node with the [bpg/proxmox](https://registry.terraform.io/providers/bpg/proxmox/latest) provider reachable
-- A sysprepped **Windows Server** template (WinRM HTTPS on 5986, Proxmox guest agent installed)
+- A sysprepped **Windows Server** template (WinRM HTTP on 5985, Proxmox guest agent installed)
 - A sysprepped **Windows 10** template (same requirements)
 - The machine running `terraform apply` must be able to reach the VM IPs over the network
 - Terraform >= 1.3
@@ -116,7 +116,7 @@ Skips post-setup entirely. Leaves you with a clean domain to configure manually.
 
 ```
 Clone DC template
-  └── wait 3m (WinRM ready)
+  └── wait 5m (WinRM ready)
       └── promote-dc.ps1  (installs AD DS role + promotes forest + reboots)
           └── wait 5m (post-promotion reboot)
               └── lab profile runs  (BadBlood / VulnAD / none)
@@ -145,7 +145,7 @@ lab_summary    = { profile = "badblood", domain = "corp.local", ... }
 ## Security Notes
 
 - Credentials are passed as plaintext CLI args to WinRM. This is intentional for a sandboxed pentesting lab — do not deploy this pattern in production.
-- WinRM uses self-signed certs (`insecure = true`). Fine for an isolated lab network.
+- WinRM uses HTTP (port 5985, unencrypted). Acceptable for an isolated lab network — do not expose these VMs to untrusted networks.
 - Add `terraform.tfvars` to `.gitignore` — it contains all your secrets.
 
 ```gitignore
