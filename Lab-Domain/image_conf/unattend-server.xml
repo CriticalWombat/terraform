@@ -25,6 +25,16 @@
             <ComputerName>*</ComputerName>
             <TimeZone>Eastern Standard Time</TimeZone>
         </component>
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+            <RunSynchronous>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Path>%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File C:\Windows\Setup\Scripts\setup.ps1</Path>
+                    <Description>Configure WinRM, guest agent, lab defaults</Description>
+                </RunSynchronousCommand>
+            </RunSynchronous>
+        </component>
     </settings>
 
     <settings pass="oobeSystem">
