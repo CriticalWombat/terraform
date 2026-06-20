@@ -87,8 +87,27 @@ if (-not (Test-Path "$dest\Invoke-BadBlood.ps1")) {
 # 3. Run BadBlood
 # ----------------------------------------------------------
 Write-Host "Running BadBlood - this may take 10-20 minutes..."
+
+# BadBlood prompts 3 times with "press any key to continue" and then
+# requires typing 'badblood' to confirm. Override Read-Host globally so
+# the child script receives automated responses without blocking.
+$global:_bbResponses = [System.Collections.Generic.Queue[string]]::new()
+@('', '', '', 'badblood') | ForEach-Object { $global:_bbResponses.Enqueue($_) }
+
+function global:Read-Host {
+    [CmdletBinding()]
+    param([Parameter(Position = 0)][object]$Prompt)
+    if ($Prompt) { Write-Host "${Prompt}: " -NoNewline }
+    $r = if ($global:_bbResponses.Count -gt 0) { $global:_bbResponses.Dequeue() } else { '' }
+    Write-Host $r
+    return $r
+}
+
 Push-Location $dest
 .\Invoke-BadBlood.ps1
 Pop-Location
+
+Remove-Item -Path Function:\Read-Host -ErrorAction SilentlyContinue
+Remove-Variable -Name _bbResponses -Scope Global -ErrorAction SilentlyContinue
 
 Write-Host "BadBlood complete. AD is now populated with vulnerable objects."
