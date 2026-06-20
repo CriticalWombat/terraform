@@ -30,8 +30,8 @@
             <RunSynchronous>
                 <RunSynchronousCommand wcm:action="add">
                     <Order>1</Order>
-                    <Path>%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File C:\Windows\Setup\Scripts\setup.ps1</Path>
-                    <Description>Configure WinRM, guest agent, lab defaults</Description>
+                    <Path>%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -NonInteractive -File C:\Windows\Setup\Scripts\setup-specialize.ps1</Path>
+                    <Description>Registry and config setup (service-safe, no WinRM)</Description>
                 </RunSynchronousCommand>
             </RunSynchronous>
         </component>
