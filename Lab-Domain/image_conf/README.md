@@ -14,11 +14,11 @@ Both templates are identical in what they need (WinRM, guest agent, VirtIO). The
 
 | File | Purpose |
 |---|---|
-| `Prepare-Template.ps1` | Run once on the source VM to clean and sysprep it |
-| `setup.ps1` | Runs automatically on first boot of every clone; configures WinRM, RDP, guest agent |
-| `SetupComplete.cmd` | Calls `setup.ps1` via the Windows Setup `SetupComplete` hook — more reliable than `FirstLogonCommands` |
-| `unattend-server.xml` | Drives Windows OOBE for the Server template |
-| `unattend-win10.xml` | Drives Windows OOBE for the Windows 10 template |
+| `Prepare-Template.ps1` | Run once on the source VM to clean, stage scripts, register the WinRM scheduled task, and sysprep |
+| `setup-specialize.ps1` | Runs during the unattend `specialize` pass via `RunSynchronous`; handles only registry and config operations that do not require Windows services |
+| `setup-winrm.ps1` | Runs on first clone boot via the `FirstBootWinRM` scheduled task; handles all service-dependent setup (WinRM, firewall, guest agent) |
+| `unattend-server.xml` | Drives Windows Setup and OOBE for the Server template |
+| `unattend-win10.xml` | Drives Windows Setup and OOBE for the Windows 10 template |
 
 ---
 
@@ -28,10 +28,11 @@ Both templates are identical in what they need (WinRM, guest agent, VirtIO). The
 [Proxmox] Create VM
     └── Install Windows from ISO
         └── Install VirtIO drivers + guest agent
-            └── Run Prepare-Template.ps1 -Password "YourPassword"
-                └── VM shuts down (sysprep complete)
-                    └── [Proxmox] Convert VM to template
-                        └── terraform apply  (Terraform clones + configures everything)
+            └── Run Windows Update to completion (reboot until none remain)
+                └── Run Prepare-Template.ps1 -Password "YourPassword"
+                    └── VM shuts down (sysprep complete)
+                        └── [Proxmox] Convert VM to template
+                            └── terraform apply  (Terraform clones + configures everything)
 ```
 
 ---
@@ -68,9 +69,9 @@ Boot from the Windows ISO. When the installer asks where to install:
 
 ---
 
-## Step 3 — Post-Install: VirtIO Drivers + Guest Agent
+## Step 3 — Post-Install: VirtIO Drivers, Guest Agent, and Windows Update
 
-After Windows boots for the first time, open Device Manager or PowerShell and install:
+After Windows boots for the first time:
 
 1. **VirtIO drivers** — run the VirtIO ISO installer:
    ```
@@ -86,7 +87,7 @@ After Windows boots for the first time, open Device Manager or PowerShell and in
 
 3. Reboot once after installation.
 
-> Verify with: `Get-Service QEMU-GA` — it should show `Running`.
+   > Verify with: `Get-Service QEMU-GA` — it should show `Running`.
 
 4. **Run Windows Update to completion before proceeding.**
 
@@ -117,9 +118,11 @@ Then run the preparation script:
 The script will:
 1. Check prerequisites (admin, guest agent, VirtIO)
 2. Clean temp files, event logs, WU cache, NIC history, WinRM certs
-3. Inject your password into the correct unattend file (auto-detected from OS type)
-4. Stage `setup.ps1` and `SetupComplete.cmd` into `C:\Windows\Setup\Scripts\`
-5. Run `sysprep /generalize /oobe /shutdown`
+3. Disable reserved storage (`DISM /Set-ReservedStorageState /State:Disabled`)
+4. Inject your password into the correct unattend file (auto-detected from OS type)
+5. Stage `setup-specialize.ps1` and `setup-winrm.ps1` into `C:\Windows\Setup\Scripts\`
+6. Register the `FirstBootWinRM` scheduled task (see below)
+7. Run `sysprep /generalize /oobe /shutdown`
 
 The VM shuts down automatically when sysprep finishes.
 
@@ -152,24 +155,57 @@ terraform apply
 
 ## What Happens on Each Clone's First Boot
 
-When Terraform clones a template and starts it:
+When Terraform clones a template and starts it, three things happen in sequence:
 
-1. Windows processes the staged `unattend.xml` specialize pass, which:
-   - Assigns a unique random hostname
-   - Enables the built-in Administrator account (Win10 only)
-   - Runs `setup.ps1` synchronously via `RunSynchronous` in SYSTEM context — no logon required
+### Phase 1 — Specialize pass (`setup-specialize.ps1`)
 
-2. The `oobeSystem` pass then sets the Administrator password and configures AutoLogon.
+Windows Setup runs the `specialize` pass from the staged unattend. A `RunSynchronous` command calls `setup-specialize.ps1` synchronously in SYSTEM context.
 
-3. `setup.ps1` configures:
-   - Proxmox guest agent (starts/enables it)
-   - RDP enabled + firewall rule opened
-   - WinRM HTTPS on port 5986 with a self-signed cert for the new hostname
-   - Windows Update auto-restart **disabled** (prevents mid-session reboots)
-   - High-performance power plan, sleep disabled
-   - Server Manager auto-open **disabled** (Server SKUs only)
+This script is intentionally limited to operations that do not require Windows services — only registry writes and executable calls. This avoids the failure mode where WinRM or the Windows Firewall aren't yet started:
 
-4. The guest agent reports the VM's IP to Proxmox, which Terraform reads to proceed with WinRM connections.
+- QEMU guest agent startup type set to Automatic (service will be started in Phase 3)
+- Windows Update auto-restart disabled
+- High-performance power plan, sleep disabled
+- RDP enabled (registry key only — firewall rule added in Phase 3)
+- Server Manager auto-open disabled (Server SKUs only)
+
+### Phase 2 — OOBE pass (`oobeSystem`)
+
+After specialize, Windows processes the `oobeSystem` pass from the unattend:
+
+- Administrator password set to the value embedded by `Prepare-Template.ps1`
+- AutoLogon configured for 3 logon cycles
+
+### Phase 3 — First startup (`setup-winrm.ps1` via scheduled task)
+
+The `FirstBootWinRM` scheduled task was registered in the template by `Prepare-Template.ps1` **before sysprep ran**. It survives sysprep generalization because it runs as `SYSTEM` — a well-known SID that is not remapped during generalization. The task fires at startup, after the Service Control Manager has started all automatic-start services, which is the only point at which WinRM and the Windows Firewall can be configured reliably.
+
+`setup-winrm.ps1` runs and:
+
+- Sets the network profile to Private (required for PSRemoting)
+- Starts the QEMU guest agent service
+- Opens the RDP firewall rule
+- Starts WinRM, runs `winrm quickconfig`, enables PSRemoting
+- Configures WSMan authentication settings (Basic, unencrypted, TrustedHosts)
+- Creates the WinRM HTTP firewall rule on port 5985
+- Restarts WinRM to apply all settings
+- **Removes the `FirstBootWinRM` scheduled task** — it is a one-shot operation and must not run again after domain promotion changes the system state
+
+The guest agent reports the VM's IP to Proxmox. Terraform reads this IP and waits up to 30 minutes for WinRM to become available before beginning provisioning.
+
+---
+
+## Why a Scheduled Task Instead of Other Mechanisms
+
+Several other approaches were tried and failed in this deployment pattern:
+
+| Mechanism | Why it failed |
+|---|---|
+| `FirstLogonCommands` | Requires AutoLogon to fire; unreliable on first boot |
+| `SetupComplete.cmd` | Did not execute reliably in this sysprep/clone scenario |
+| `RunSynchronous` (full setup) | WinRM and firewall services not started during specialize pass — script aborted |
+
+The scheduled task approach works because the Task Scheduler fires startup tasks after the system is fully operational, independent of any user interaction. The SYSTEM SID is preserved through sysprep so no re-registration is needed per clone.
 
 ---
 
@@ -179,7 +215,10 @@ When Terraform clones a template and starts it:
 The guest agent is not running. RDP into the VM and run `Get-Service QEMU-GA`. If missing, install `qemu-ga-x86_64.msi` from the VirtIO ISO and re-template.
 
 **WinRM connection refused / timeout**  
-Check `C:\Windows\Temp\setup.log` on the clone. If the file is empty or missing, the unattend didn't run `setup.ps1` — the template may have been booted after sysprep. Rebuild from the ISO.
+Check `C:\Windows\Temp\setup.log` on the clone. Look for the `=== WinRM first-boot setup` section. If it is missing, the `FirstBootWinRM` scheduled task did not run — check Task Scheduler (`taskschd.msc`) on the clone to see if the task still exists and whether it has a last-run result. If the task is missing entirely, the template was not built with the current `Prepare-Template.ps1` — rebuild the template.
+
+**`FirstBootWinRM` task exists but shows a failure code**  
+Open `C:\Windows\Temp\setup.log` and find the `FATAL:` line. Common causes: WinRM service failed to start (check Event Viewer → System for Service Control Manager errors), or the Scripts directory is missing (`C:\Windows\Setup\Scripts\setup-winrm.ps1`). The latter means the template disk image is from before the split-script change — rebuild the template.
 
 **Sysprep fails with `hr = 0x800f0975` (reserved storage in use)**  
 A Windows Update or servicing operation is holding reserved storage. Run Windows Update to completion (rebooting until no updates remain), then re-run `Prepare-Template.ps1`. The script also runs `DISM /Set-ReservedStorageState /State:Disabled` automatically, but this cannot override an actively running update.
