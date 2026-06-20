@@ -80,14 +80,14 @@ if (-not (Test-Path $WinRMPath)) {
 }
 Write-OK "setup-winrm.ps1: $WinRMPath"
 
-# Proxmox guest agent check — critical for Terraform IP discovery
+# Proxmox guest agent check - critical for Terraform IP discovery
 $ga = Get-Service "QEMU-GA" -ErrorAction SilentlyContinue
 if ($ga) {
     Write-OK "Proxmox guest agent (QEMU-GA) is installed"
 } else {
-    Write-WARN "Proxmox guest agent NOT found — Terraform cannot discover the VM IP without it."
+    Write-WARN "Proxmox guest agent NOT found - Terraform cannot discover the VM IP without it."
     Write-WARN "Install qemu-ga-x86_64.msi from the VirtIO ISO before templating."
-    Write-WARN "Continuing anyway — install it before converting to template."
+    Write-WARN "Continuing anyway - install it before converting to template."
 }
 
 # VirtIO NIC check (proxy for VirtIO drivers being installed)
@@ -154,7 +154,7 @@ Stop-Service wuauserv, bits -Force
 Start-Service wuauserv, bits
 Write-OK "Windows Update cache cleared"
 
-# Disable reserved storage — sysprep /generalize fails with hr=0x800f0975 when
+# Disable reserved storage - sysprep /generalize fails with hr=0x800f0975 when
 # this feature (Win10 1903+) is in use. Benign non-zero exit on Server SKUs.
 $dismOut = & dism.exe /Online /Set-ReservedStorageState /State:Disabled 2>&1
 if ($LASTEXITCODE -eq 0) {
@@ -249,7 +249,7 @@ Copy-Item $WinRMPath "$scriptDest\setup-winrm.ps1" -Force
 Write-OK "setup-winrm.ps1 staged to $scriptDest\setup-winrm.ps1"
 
 # Register the FirstBootWinRM scheduled task. It fires on the first clone boot
-# after all services are running — the only point where WinRM and the firewall
+# after all services are running - the only point where WinRM and the firewall
 # can be reliably configured. The task runs as SYSTEM (a well-known SID that
 # sysprep does not remap) so it survives generalization. setup-winrm.ps1
 # removes the task when it completes successfully.
