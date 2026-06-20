@@ -45,7 +45,7 @@ if (-not $adReady) {
     Write-Host "ERROR: AD did not become queryable within 5 minutes of services starting"
     exit 1
 }
-Write-Host "AD is queryable — proceeding with BadBlood"
+Write-Host "AD is queryable - proceeding with BadBlood"
 
 # ----------------------------------------------------------
 # 2. Download BadBlood
@@ -55,10 +55,20 @@ $dest = "C:\setup\BadBlood"
 if (-not (Test-Path "$dest\Invoke-BadBlood.ps1")) {
     Write-Host "Downloading BadBlood..."
     $zip = "C:\setup\badblood.zip"
+
+    # Suppress progress bar - rendering it over a WinRM session stalls the download
+    $ProgressPreference = 'SilentlyContinue'
     Invoke-WebRequest `
         -Uri "https://github.com/davidprowe/BadBlood/archive/refs/heads/master.zip" `
         -OutFile $zip `
         -UseBasicParsing
+    $ProgressPreference = 'Continue'
+
+    if (-not (Test-Path $zip) -or (Get-Item $zip).Length -eq 0) {
+        Write-Host "ERROR: BadBlood zip was not downloaded or is empty"
+        exit 1
+    }
+    Write-Host "Downloaded $([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB"
 
     Write-Host "Extracting..."
     Expand-Archive -Path $zip -DestinationPath "C:\setup" -Force
@@ -66,12 +76,17 @@ if (-not (Test-Path "$dest\Invoke-BadBlood.ps1")) {
         Rename-Item "C:\setup\BadBlood-master" $dest
     }
     Remove-Item $zip -ErrorAction SilentlyContinue
+
+    if (-not (Test-Path "$dest\Invoke-BadBlood.ps1")) {
+        Write-Host "ERROR: Extraction did not produce expected file at $dest\Invoke-BadBlood.ps1"
+        exit 1
+    }
 }
 
 # ----------------------------------------------------------
 # 3. Run BadBlood
 # ----------------------------------------------------------
-Write-Host "Running BadBlood — this may take 10-20 minutes..."
+Write-Host "Running BadBlood - this may take 10-20 minutes..."
 Push-Location $dest
 .\Invoke-BadBlood.ps1
 Pop-Location
