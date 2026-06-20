@@ -2,9 +2,9 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$Password,
 
-    [string]$WinRMScriptPath = "$PSScriptRoot\setup.ps1",
+    [string]$SpecializePath = "$PSScriptRoot\setup-specialize.ps1",
 
-    [string]$SetupCompletePath = "$PSScriptRoot\SetupComplete.cmd",
+    [string]$WinRMPath = "$PSScriptRoot\setup-winrm.ps1",
 
     # Auto-detected from OS type if not specified
     [string]$UnattendPath = "",
@@ -68,17 +68,17 @@ if (-not (Test-Path $UnattendPath)) {
 }
 Write-OK "Unattend: $UnattendPath"
 
-if (-not (Test-Path $WinRMScriptPath)) {
-    Write-FAIL "setup.ps1 not found: $WinRMScriptPath"
+if (-not (Test-Path $SpecializePath)) {
+    Write-FAIL "setup-specialize.ps1 not found: $SpecializePath"
     exit 1
 }
-Write-OK "setup.ps1: $WinRMScriptPath"
+Write-OK "setup-specialize.ps1: $SpecializePath"
 
-if (-not (Test-Path $SetupCompletePath)) {
-    Write-FAIL "SetupComplete.cmd not found: $SetupCompletePath"
+if (-not (Test-Path $WinRMPath)) {
+    Write-FAIL "setup-winrm.ps1 not found: $WinRMPath"
     exit 1
 }
-Write-OK "SetupComplete.cmd: $SetupCompletePath"
+Write-OK "setup-winrm.ps1: $WinRMPath"
 
 # Proxmox guest agent check — critical for Terraform IP discovery
 $ga = Get-Service "QEMU-GA" -ErrorAction SilentlyContinue
@@ -243,10 +243,25 @@ Write-OK "Unattend written to $sysprepUnattend (password injected)"
 
 $scriptDest = "C:\Windows\Setup\Scripts"
 if (-not (Test-Path $scriptDest)) { New-Item -ItemType Directory -Path $scriptDest -Force | Out-Null }
-Copy-Item $WinRMScriptPath "$scriptDest\setup.ps1" -Force
-Write-OK "setup.ps1 staged to $scriptDest\setup.ps1"
-Copy-Item $SetupCompletePath "$scriptDest\SetupComplete.cmd" -Force
-Write-OK "SetupComplete.cmd staged to $scriptDest\SetupComplete.cmd"
+Copy-Item $SpecializePath "$scriptDest\setup-specialize.ps1" -Force
+Write-OK "setup-specialize.ps1 staged to $scriptDest\setup-specialize.ps1"
+Copy-Item $WinRMPath "$scriptDest\setup-winrm.ps1" -Force
+Write-OK "setup-winrm.ps1 staged to $scriptDest\setup-winrm.ps1"
+
+# Register the FirstBootWinRM scheduled task. It fires on the first clone boot
+# after all services are running — the only point where WinRM and the firewall
+# can be reliably configured. The task runs as SYSTEM (a well-known SID that
+# sysprep does not remap) so it survives generalization. setup-winrm.ps1
+# removes the task when it completes successfully.
+$stAction    = New-ScheduledTaskAction `
+                   -Execute '%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe' `
+                   -Argument '-ExecutionPolicy Bypass -NonInteractive -File "C:\Windows\Setup\Scripts\setup-winrm.ps1"'
+$stTrigger   = New-ScheduledTaskTrigger -AtStartup
+$stSettings  = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -MultipleInstances IgnoreNew
+$stPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+Register-ScheduledTask -TaskName 'FirstBootWinRM' -Action $stAction -Trigger $stTrigger `
+    -Settings $stSettings -Principal $stPrincipal -Force | Out-Null
+Write-OK "Scheduled task 'FirstBootWinRM' registered"
 
 
 # ============================================================
