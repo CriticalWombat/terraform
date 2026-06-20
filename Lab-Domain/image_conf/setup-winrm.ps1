@@ -1,9 +1,9 @@
-# setup-winrm.ps1 — runs once on first clone boot via the FirstBootWinRM scheduled task.
+# setup-winrm.ps1 - runs once on first clone boot via the FirstBootWinRM scheduled task.
 # The task is registered by Prepare-Template.ps1 before sysprep and survives
 # generalization because it runs as SYSTEM (a well-known SID that is not remapped).
 # By the time this task fires all Windows services are fully started, so WinRM,
 # the Windows Firewall (MpsSvc), and the guest agent can all be configured reliably.
-# Deletes the FirstBootWinRM task when done — it is a one-shot operation.
+# Deletes the FirstBootWinRM task when done - it is a one-shot operation.
 # Shared by both the Windows Server (DC) and Windows 10 (client) templates.
 
 $logFile = "C:\Windows\Temp\setup.log"
@@ -31,14 +31,14 @@ try {
 }
 
 # ----------------------------------------------------------
-# 2. QEMU guest agent — start service (startup type was set during specialize)
+# 2. QEMU guest agent - start service (startup type was set during specialize)
 # ----------------------------------------------------------
 $ga = Get-Service "QEMU-GA" -ErrorAction SilentlyContinue
 if ($ga) {
     Start-Service "QEMU-GA" -ErrorAction SilentlyContinue
     Write-Log "QEMU guest agent started"
 } else {
-    Write-Log "QEMU guest agent not installed — Terraform IP discovery will fail!" "WARN"
+    Write-Log "QEMU guest agent not installed - Terraform IP discovery will fail!" "WARN"
 }
 
 # ----------------------------------------------------------
@@ -86,10 +86,10 @@ Write-Log "WinRM firewall rule created (port 5985)"
 # 6. Restart WinRM to apply all changes
 # ----------------------------------------------------------
 Restart-Service WinRM
-Write-Log "=== WinRM setup complete — HTTP ready on port 5985 ==="
+Write-Log "=== WinRM setup complete - HTTP ready on port 5985 ==="
 
 # ----------------------------------------------------------
-# 7. Remove this scheduled task — one-shot, never needs to run again
+# 7. Remove this scheduled task - one-shot, never needs to run again
 # ----------------------------------------------------------
 Unregister-ScheduledTask -TaskName 'FirstBootWinRM' -Confirm:$false -ErrorAction SilentlyContinue
 Write-Log "FirstBootWinRM scheduled task removed"
