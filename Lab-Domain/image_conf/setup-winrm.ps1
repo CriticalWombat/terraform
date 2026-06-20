@@ -1,4 +1,9 @@
-# setup.ps1 — runs once on first boot of every clone via SetupComplete.cmd (SYSTEM context).
+# setup-winrm.ps1 — runs once on first clone boot via the FirstBootWinRM scheduled task.
+# The task is registered by Prepare-Template.ps1 before sysprep and survives
+# generalization because it runs as SYSTEM (a well-known SID that is not remapped).
+# By the time this task fires all Windows services are fully started, so WinRM,
+# the Windows Firewall (MpsSvc), and the guest agent can all be configured reliably.
+# Deletes the FirstBootWinRM task when done — it is a one-shot operation.
 # Shared by both the Windows Server (DC) and Windows 10 (client) templates.
 
 $logFile = "C:\Windows\Temp\setup.log"
@@ -13,7 +18,7 @@ function Write-Log {
 
 trap { Write-Log "FATAL: $_" "ERROR"; exit 1 }
 
-Write-Log "=== First-boot setup starting on $env:COMPUTERNAME ==="
+Write-Log "=== WinRM first-boot setup starting on $env:COMPUTERNAME ==="
 
 # ----------------------------------------------------------
 # 1. Network profile -> Private (required for PSRemoting)
@@ -26,13 +31,10 @@ try {
 }
 
 # ----------------------------------------------------------
-# 2. Proxmox QEMU guest agent
-#    Must be pre-installed in the template from the VirtIO ISO.
-#    This just ensures the service is running after clone boot.
+# 2. QEMU guest agent — start service (startup type was set during specialize)
 # ----------------------------------------------------------
 $ga = Get-Service "QEMU-GA" -ErrorAction SilentlyContinue
 if ($ga) {
-    Set-Service "QEMU-GA" -StartupType Automatic
     Start-Service "QEMU-GA" -ErrorAction SilentlyContinue
     Write-Log "QEMU guest agent started"
 } else {
@@ -40,38 +42,13 @@ if ($ga) {
 }
 
 # ----------------------------------------------------------
-# 3. Disable Windows Update automatic restart
-#    Prevents unexpected reboots mid-lab-session.
+# 3. RDP firewall rule (MpsSvc is running by the time this task fires)
 # ----------------------------------------------------------
-$auKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
-New-Item -Path $auKey -Force | Out-Null
-Set-ItemProperty -Path $auKey -Name "NoAutoRebootWithLoggedOnUsers" -Value 1 -Type DWORD -Force
-Set-ItemProperty -Path $auKey -Name "AUOptions"                     -Value 1 -Type DWORD -Force
-Write-Log "Windows Update auto-restart disabled"
-
-# ----------------------------------------------------------
-# 4. High-performance power plan + disable sleep/screensaver
-#    Prevents VMs from going idle during long pentesting runs.
-# ----------------------------------------------------------
-powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null   # High performance GUID
-powercfg /change standby-timeout-ac 0
-powercfg /change hibernate-timeout-ac 0
-Write-Log "Power plan set to High Performance, sleep disabled"
-
-# ----------------------------------------------------------
-# 5. Enable RDP + disable Server Manager auto-open (Server SKUs only)
-# ----------------------------------------------------------
-Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Type DWORD -Force
 Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue
-Write-Log "RDP enabled"
-
-if ((Get-CimInstance Win32_OperatingSystem).Caption -match 'Server') {
-    New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\ServerManager' -Name 'DoNotOpenServerManagerAtLogon' -Value 1 -PropertyType DWORD -Force | Out-Null
-    Write-Log "Server Manager auto-open disabled"
-}
+Write-Log "RDP firewall rule enabled"
 
 # ----------------------------------------------------------
-# 6. WinRM service
+# 4. WinRM service
 # ----------------------------------------------------------
 Set-Service WinRM -StartupType Automatic
 Start-Service WinRM -ErrorAction SilentlyContinue
@@ -94,7 +71,7 @@ Set-Item WSMan:\localhost\Client\TrustedHosts       -Value '*' -Force
 Write-Log "WSMan auth settings configured"
 
 # ----------------------------------------------------------
-# 7. Firewall rule for WinRM HTTP
+# 5. Firewall rule for WinRM HTTP
 # ----------------------------------------------------------
 @("WinRM-HTTP", "Windows Remote Management (HTTP-In)") |
     ForEach-Object {
@@ -106,7 +83,13 @@ New-NetFirewallRule -Name "WinRM-HTTP" -DisplayName "WinRM HTTP" -Enabled True -
 Write-Log "WinRM firewall rule created (port 5985)"
 
 # ----------------------------------------------------------
-# 8. Restart WinRM to apply all changes
+# 6. Restart WinRM to apply all changes
 # ----------------------------------------------------------
 Restart-Service WinRM
-Write-Log "=== Setup complete — WinRM HTTP ready on port 5985 ==="
+Write-Log "=== WinRM setup complete — HTTP ready on port 5985 ==="
+
+# ----------------------------------------------------------
+# 7. Remove this scheduled task — one-shot, never needs to run again
+# ----------------------------------------------------------
+Unregister-ScheduledTask -TaskName 'FirstBootWinRM' -Confirm:$false -ErrorAction SilentlyContinue
+Write-Log "FirstBootWinRM scheduled task removed"

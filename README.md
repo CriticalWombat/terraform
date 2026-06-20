@@ -7,7 +7,7 @@ Provisions a Windows Active Directory lab on Proxmox. Clones pre-built templates
 ## Prerequisites
 
 - Proxmox node with the [bpg/proxmox](https://registry.terraform.io/providers/bpg/proxmox/latest) provider reachable
-- A sysprepped **Windows Server** template (WinRM HTTP on 5985, Proxmox guest agent installed)
+- A sysprepped **Windows Server** template (WinRM HTTP on 5985, Proxmox guest agent installed, built with current `Prepare-Template.ps1`)
 - A sysprepped **Windows 10** template (same requirements)
 - The machine running `terraform apply` must be able to reach the VM IPs over the network
 - Terraform >= 1.3
@@ -116,15 +116,17 @@ Skips post-setup entirely. Leaves you with a clean domain to configure manually.
 
 ```
 Clone DC template
-  └── wait 5m (WinRM ready)
-      └── promote-dc.ps1  (installs AD DS role + promotes forest + reboots)
-          └── wait 5m (post-promotion reboot)
-              └── lab profile runs  (BadBlood / VulnAD / none)
+  └── FirstBootWinRM scheduled task fires (configures WinRM on port 5985)
+      └── wait 5m (Terraform connection buffer)
+          └── promote-dc.ps1  (installs AD DS role + promotes forest + reboots)
+              └── wait 10m (post-promotion reboot + AD services start)
+                  └── lab profile runs  (BadBlood / VulnAD / none)
 
 Clone client templates  (parallel, depends on DC module completing)
-  └── wait 5m (WinRM ready)
-      └── set DNS → DC IP
-          └── join-domain.ps1  (joins domain + reboots)
+  └── FirstBootWinRM scheduled task fires (configures WinRM on port 5985)
+      └── wait 5m (Terraform connection buffer)
+          └── set DNS → DC IP
+              └── join-domain.ps1  (joins domain + reboots)
 ```
 
 ---
