@@ -88,7 +88,7 @@ if (-not (Test-Path "$dest\Invoke-BadBlood.ps1")) {
 # ----------------------------------------------------------
 Write-Host "Running BadBlood - this may take 10-20 minutes..."
 Push-Location $dest
-.\Invoke-BadBlood.ps1
+.\Invoke-BadBlood.ps1 -UserCount 1000 -GroupCount 200 -ComputerCount 50 -NonInteractive
 Pop-Location
 
 Write-Host "BadBlood complete. AD is now populated with vulnerable objects."
