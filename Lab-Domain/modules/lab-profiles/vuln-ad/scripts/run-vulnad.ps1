@@ -49,7 +49,7 @@ if (-not $adReady) {
     Write-Host "ERROR: AD did not become queryable within 5 minutes of services starting"
     exit 1
 }
-Write-Host "AD is queryable — proceeding with vulnerable-AD"
+Write-Host "AD is queryable - proceeding with vulnerable-AD"
 
 # ----------------------------------------------------------
 # 2. Download and run vulnerable-AD
@@ -58,10 +58,17 @@ $script = "C:\setup\vulnerable-AD.ps1"
 
 if (-not (Test-Path $script)) {
     Write-Host "Downloading vulnerable-AD..."
+    $ProgressPreference = 'SilentlyContinue'
     Invoke-WebRequest `
         -Uri "https://raw.githubusercontent.com/WazeHell/vulnerable-AD/master/vulnerable-AD.ps1" `
         -OutFile $script `
         -UseBasicParsing
+    $ProgressPreference = 'Continue'
+
+    if (-not (Test-Path $script) -or (Get-Item $script).Length -eq 0) {
+        Write-Host "ERROR: vulnerable-AD script was not downloaded or is empty"
+        exit 1
+    }
 }
 
 Write-Host "Running vulnerable-AD..."

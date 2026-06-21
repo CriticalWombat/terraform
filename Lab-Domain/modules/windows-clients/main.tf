@@ -13,7 +13,7 @@ locals {
     format("WIN10-%02d", i + 1) => {
       vm_id  = var.vm_id_base + i
       cores  = 4
-      memory = 4096
+      memory = 8192
       disk   = 60
     }
   }

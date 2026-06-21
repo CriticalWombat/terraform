@@ -41,15 +41,53 @@ Both templates are identical in what they need (WinRM, guest agent, VirtIO). The
 
 Create a new VM with these settings (adjust to your hardware):
 
+**System tab**
+
+| Setting | Value |
+|---|---|
+| Machine | Q35 |
+| BIOS | SeaBIOS |
+| SCSI Controller | VirtIO SCSI |
+| Qemu Agent | Enabled |
+
+**CPU tab**
+
 | Setting | Windows Server (DC) | Windows 10 (clients) |
 |---|---|---|
-| CPU | 4 cores | 4 cores |
-| RAM | 8 GB | 4 GB |
-| Disk | 80 GB, **SCSI**, VirtIO SCSI controller | 60 GB, **SCSI**, VirtIO SCSI controller |
-| NIC | **VirtIO** (paravirtualized) | **VirtIO** (paravirtualized) |
-| CD drive 1 | Windows ISO | Windows ISO |
-| CD drive 2 | [VirtIO ISO](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso) | VirtIO ISO |
-| QEMU Guest Agent | **Enabled** (VM Options tab) | **Enabled** |
+| CPU Type | kvm64 | kvm64 |
+| Cores | 4 | 4 |
+| NUMA | Enabled | Enabled |
+
+**Memory tab**
+
+| Setting | Windows Server (DC) | Windows 10 (clients) |
+|---|---|---|
+| RAM | 8 GB | 8 GB |
+| Ballooning Device | Disabled | Disabled |
+| Allow KSM | Disabled | Disabled |
+
+**Hard Disk tab**
+
+| Setting | Windows Server (DC) | Windows 10 (clients) |
+|---|---|---|
+| Bus/Device | SCSI | SCSI |
+| Size | 80 GB | 60 GB |
+| Cache | No cache | No cache |
+| Discard | Yes | Yes |
+
+**Network tab**
+
+| Setting | Value |
+|---|---|
+| Model | VirtIO (paravirtualized) |
+| Firewall | Disabled |
+
+**CD Drives**
+
+| Drive | Value |
+|---|---|
+| CD drive 1 | Windows ISO |
+| CD drive 2 | [VirtIO ISO](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso) |
 
 > The VirtIO ISO is needed so Windows can see the SCSI disk and NIC during installation.
 
