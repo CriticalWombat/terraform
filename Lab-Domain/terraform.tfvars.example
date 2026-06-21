@@ -1,22 +1,31 @@
-# Copy this file to terraform.tfvars and fill in your values
-# cp terraform.tfvars.example terraform.tfvars
+# Copy to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit it.
 
-# Proxmox Connection
-proxmox_endpoint     = "https://your-proxmox-ip:8006"
-proxmox_username     = "root@pam"
-proxmox_api_token    = "your-api-token"
-proxmox_insecure     = true
-proxmox_ssh_username = "root"
-proxmox_ssh_password = "your-ssh-password"
+# Proxmox connection
+proxmox_endpoint     = "https://192.168.1.10:8006"
+proxmox_api_token    = "root@pam!terraform=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+proxmox_ssh_password = "your-proxmox-root-password"
+proxmox_node         = "pve"
 
-# VM Credentials
-admin_username = "Administrator"
-admin_password = "ChangeMe123!"
+# Storage / networking
+datastore      = "local-lvm"
+network_bridge = "vmbr0"
 
-# Domain Configuration
-domain_name         = "contoso.local"
-domain_netbios_name = "CONTOSO"
-safe_mode_password  = "SafeM0de!123"
+# Template VM IDs (must exist in Proxmox before apply)
+dc_template_id    = 9100
+win10_template_id = 9010
+vm_id_base        = 8000   # DC=8000, clients=8001, 8002, ...
 
-# Client Configuration
+# Credentials (must match your template unattend.xml)
+admin_password     = "LabAdmin123!"
+safe_mode_password = "DSRMpass123!"
+
+# Active Directory
+domain_name    = "corp.local"
+domain_netbios = "CORP"
+
+# Clients
 client_count = 2
+
+# Lab profile: badblood | vulnad | none
+lab_profile = "badblood"

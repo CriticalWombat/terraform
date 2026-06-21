@@ -3,82 +3,113 @@
 # ============================================
 
 variable "proxmox_endpoint" {
-  description = "Proxmox API endpoint"
-  type        = string
-}
-
-variable "proxmox_username" {
-  description = "Proxmox username (e.g., root@pam)"
+  description = "Proxmox API endpoint (e.g. https://192.168.1.10:8006)"
   type        = string
 }
 
 variable "proxmox_api_token" {
-  description = "Proxmox API token"
+  description = "Proxmox API token (e.g. root@pam!terraform=<uuid>)"
   type        = string
-
-}
-
-variable "proxmox_insecure" {
-  description = "Allow insecure SSL connections"
-  type        = bool
-  default     = true
-}
-
-variable "proxmox_ssh_username" {
-  description = "Proxmox SSH username"
-  type        = string
+  sensitive   = false # Change this if you want to restrict passwords on the cli output
 }
 
 variable "proxmox_ssh_password" {
-  description = "Proxmox SSH password"
+  description = "Proxmox root SSH password (used by the provider for file operations)"
   type        = string
+  sensitive   = false # Change this if you want to restrict passwords on the cli output
+}
 
+variable "proxmox_node" {
+  description = "Proxmox node name"
+  type        = string
+  default     = "pve"
 }
 
 # ============================================
-# VM CREDENTIALS
+# STORAGE & NETWORKING
 # ============================================
 
-variable "admin_username" {
-  description = "Administrator username for all VMs"
+variable "datastore" {
+  description = "Proxmox datastore for VM disks"
   type        = string
-  default     = "Administrator"
+  default     = "local-lvm"
 }
+
+variable "network_bridge" {
+  description = "Proxmox network bridge"
+  type        = string
+  default     = "vmbr0"
+}
+
+# ============================================
+# TEMPLATES
+# ============================================
+
+variable "dc_template_id" {
+  description = "VM ID of the Windows Server template to clone for the DC"
+  type        = number
+}
+
+variable "win10_template_id" {
+  description = "VM ID of the Windows 10 template to clone for clients"
+  type        = number
+}
+
+variable "vm_id_base" {
+  description = "Base VM ID. DC gets this ID; clients are assigned sequential IDs above it"
+  type        = number
+  default     = 8000
+}
+
+# ============================================
+# CREDENTIALS
+# ============================================
 
 variable "admin_password" {
-  description = "Administrator password for all VMs"
+  description = "Local Administrator password set in the VM templates"
   type        = string
-
+  sensitive   = false # Change this if you want to restrict passwords on the cli output
 }
 
 # ============================================
-# DOMAIN CONFIGURATION
+# ACTIVE DIRECTORY
 # ============================================
 
 variable "domain_name" {
-  description = "Active Directory domain name (FQDN)"
+  description = "Active Directory domain FQDN"
   type        = string
-  default     = "contoso.local"
+  default     = "corp.local"
 }
 
-variable "domain_netbios_name" {
+variable "domain_netbios" {
   description = "Active Directory NetBIOS name"
   type        = string
-  default     = "CONTOSO"
+  default     = "CORP"
 }
 
 variable "safe_mode_password" {
-  description = "Safe mode administrator password for DC"
+  description = "DSRM (Directory Services Restore Mode) password for the DC"
   type        = string
+  sensitive   = false # Change this if you want to restrict passwords on the cli output
+}
 
+variable "client_count" {
+  description = "Number of Windows 10 workstations to join the domain"
+  type        = number
+  default     = 1
 }
 
 # ============================================
-# CLIENT CONFIGURATION
+# LAB PROFILE
 # ============================================
 
-variable "client_count" {
-  description = "Number of Windows 10 clients to create"
-  type        = number
-  default     = 1
+variable "lab_profile" {
+  description = "AD vulnerability profile to deploy after DC promotion. Options: badblood, vulnad, none"
+  type        = string
+  default     = "badblood"
+
+  validation {
+    condition     = contains(["badblood", "vulnad", "none"], var.lab_profile)
+    error_message = "lab_profile must be one of: badblood, vulnad, none"
+  }
 }
